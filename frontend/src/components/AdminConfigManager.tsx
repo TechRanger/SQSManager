@@ -490,40 +490,38 @@ const AdminConfigManager: React.FC<AdminConfigManagerProps> = ({
                     );
                 })()}
 
-                {/* Admins By Group List */}
-                <div className="mt-fluent-md space-y-4">
+                {/* Admins By Group List - Using FluentTable within each group section */}
+                <div className="mt-fluent-md space-y-6">
                     {Object.keys(adminsByGroup).length === 0 ? (
                         <p className="text-sm text-gray-500 italic">暂无管理员分配。</p>
                     ) : (
                         Object.entries(adminsByGroup).map(([groupName, admins]) => (
-                            <div key={groupName} className="border border-gray-200 rounded-md overflow-hidden">
-                                <div className="bg-gray-50 p-3 border-b border-gray-200">
-                                    <h6 className="font-bold text-neutral-foreground">权限组：{groupName}</h6>
-                                </div>
-                                <div className="p-0">
-                                    <FluentTable headers={["Steam ID", "注释", "操作"]}>
-                                        {admins.map((admin) => {
-                                            const key = `${admin.steamId}:${admin.groupName}`;
-                                            const isDeleting = deletingAdminKey === key;
-                                            return (
-                                                <FluentRow key={key}>
-                                                    <td className="whitespace-nowrap text-gray-700 font-mono">{admin.steamId}</td>
-                                                    <td className="text-gray-700 max-w-md truncate">{admin.comment || '-'}</td>
-                                                    <td className="whitespace-nowrap text-right">
-                                                        <FluentButton
-                                                            variant="danger"
-                                                            size="small"
-                                                            disabled={isDeleting || !!deletingAdminKey}
-                                                            onClick={() => handleDeleteAdmin(admin.steamId, admin.groupName)}
-                                                        >
-                                                            {isDeleting ? '删除中...' : '删除'}
-                                                        </FluentButton>
-                                                    </td>
-                                                </FluentRow>
-                                            );
-                                        })}
-                                    </FluentTable>
-                                </div>
+                            <div key={groupName}>
+                                <h6 className="font-semibold text-neutral-foreground mb-3">权限组：{groupName}</h6>
+                                <FluentTable headers={["Steam ID", "注释", "操作"]}>
+                                    {admins.map((admin) => {
+                                        const key = `${admin.steamId}:${admin.groupName}`;
+                                        const isDeleting = deletingAdminKey === key;
+                                        return (
+                                            <FluentRow key={key}>
+                                                <td className="whitespace-nowrap text-gray-700 font-mono">{admin.steamId}</td>
+                                                <td className="text-gray-700 max-w-xs truncate">{admin.comment || '-'}</td>
+                                                <td className="whitespace-nowrap text-right">
+                                                    <FluentButton
+                                                        variant="danger"
+                                                        size="small"
+                                                        disabled={isDeleting || !!deletingAdminKey}
+                                                        onClick={() => handleDeleteAdmin(admin.steamId, admin.groupName)}
+                                                        icon={<Trash2 className="h-4 w-4"/>}
+                                                        // className="!py-1 !px-2" // Revert button style if needed
+                                                    >
+                                                        {isDeleting ? '删除中...' : '删除'}
+                                                    </FluentButton>
+                                                </td>
+                                            </FluentRow>
+                                        );
+                                    })}
+                                </FluentTable>
                             </div>
                         ))
                     )}

@@ -10,14 +10,14 @@ import FluentTable from '../components/ui/FluentTable';
 import FluentRow from '../components/ui/FluentRow';
 import { LuRefreshCw, LuArrowRight } from "react-icons/lu";
 
-// 服务器实例接口 (字段变为可选以适应不同权限)
+// 服务器实例接口
 interface ServerInstance {
   id: number;
   name: string;
-  description?: string; // Optional
-  game?: string;        // Optional
-  isRunning?: boolean;    // Optional (but likely needed even for basic view)
-  rconEnabled?: boolean;  // Optional
+  description: string;
+  game: string;
+  isRunning: boolean;
+  rconEnabled: boolean;
 }
 
 // 服务器实例状态接口
@@ -66,29 +66,20 @@ function GameSessionManagementPage() {
       // 获取所有服务器实例
       const serversResponse = await getAllServerInstances();
       
-      // 过滤出运行中的服务器 (如果 isRunning 字段存在)
-      const runningServers = serversResponse.data.filter((server: ServerInstance) => server.isRunning === true);
+      // 过滤出运行中的服务器
+      const runningServers = serversResponse.data.filter((server: ServerInstance) => server.isRunning);
       setServers(runningServers);
       
-      // 如果有运行中的服务器，尝试获取它们的状态
+      // 如果有运行中的服务器，获取它们的状态
       if (runningServers.length > 0) {
-        try {
-           const statusesResponse = await getAllServerInstanceStatuses();
-           const statusesMap: Record<number, ServerInstanceStatus> = {};
-           statusesResponse.data.forEach((status: ServerInstanceStatus) => {
-             // Only map statuses for servers we are showing (running servers)
-             if (runningServers.some((s: ServerInstance) => s.id === status.id)) {
-                statusesMap[status.id] = status;
-             }
-           });
-           setServerStatuses(statusesMap);
-        } catch (statusErr: any) {
-           console.warn("获取服务器状态失败 (可能权限不足):", statusErr);
-           // Don't set global error, just proceed without status info
-           setServerStatuses({}); // Clear statuses on error
-        }
-      } else {
-         setServerStatuses({}); // No running servers, clear statuses
+        const statusesResponse = await getAllServerInstanceStatuses();
+        
+        // 将服务器状态转换为以服务器ID为键的对象
+        const statusesMap: Record<number, ServerInstanceStatus> = {};
+        statusesResponse.data.forEach((status: ServerInstanceStatus) => {
+          statusesMap[status.id] = status;
+        });
+        setServerStatuses(statusesMap);
       }
     } catch (err: any) {
       console.error("获取服务器列表失败:", err);
@@ -107,25 +98,13 @@ function GameSessionManagementPage() {
     fetchServers(false);
   };
 
-  // 检查用户权限
-  const canViewPage = hasPermission('game_session:view');
-  const canFetchServerList = hasPermission('server:view_basic') || hasPermission('server:view_all');
-
-  if (!canViewPage || !canFetchServerList) {
-    let message = '';
-    if (!canViewPage && !canFetchServerList) {
-      message = '您没有查看对局管理和获取服务器列表的权限。';
-    } else if (!canViewPage) {
-      message = '您没有查看对局管理的权限。';
-    } else { // !canFetchServerList
-      message = '您没有获取服务器列表的权限 (需要 server:view_basic 或 server:view_all)。';
-    }
-
+  // 如果用户没有对局管理权限，显示错误信息
+  if (!hasPermission('game_session:view')) {
     return (
       <div className="p-fluent-3xl text-center">
         <AlertMessage 
           type="error" 
-          message={message} 
+          message="您没有对局管理的权限" 
           className="mb-6" 
         />
         <FluentButton 
@@ -177,30 +156,27 @@ function GameSessionManagementPage() {
             headers={["服务器名称", "玩家数", "当前地图", "RCON状态", "操作"]}
           >
             {servers.map(server => {
-              const status = serverStatuses[server.id]; // status might be undefined if fetch failed
-              const isRconEnabled = server.rconEnabled === true; // Check if rconEnabled is explicitly true
-              const rconDisplayStatus = status?.rconStatus === 'Connected' ? '已连接' : '未连接';
-
+              const status = serverStatuses[server.id];
               return (
                 <FluentRow key={server.id}>
                   <td className="whitespace-nowrap text-gray-700 font-medium">{server.name}</td>
                   <td className="whitespace-nowrap text-gray-500">
                     {status?.playerCount !== undefined && status?.playerCount !== null
                       ? `${status.playerCount}`
-                      : 'N/A' // Show N/A if status or playerCount is missing
+                      : 'N/A'
                     }
                   </td>
                   <td className="whitespace-nowrap text-gray-500">
-                    {status?.currentLevel || 'N/A'} {/* Show N/A if status or currentLevel is missing */}
+                    {status?.currentLevel || 'N/A'}
                   </td>
                   <td className="whitespace-nowrap">
-                    {isRconEnabled ? (
+                    {server.rconEnabled ? (
                       <span className={`px-2 py-1 text-xs rounded-full font-medium ${
                         status?.rconStatus === 'Connected' 
                           ? 'bg-green-100 text-green-700' 
                           : 'bg-orange-100 text-orange-700'
                       }`}>
-                        {status ? rconDisplayStatus : '状态未知'} {/* Handle missing status */}
+                        {status?.rconStatus === 'Connected' ? '已连接' : '未连接'}
                       </span>
                     ) : (
                       <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700">

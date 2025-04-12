@@ -7,8 +7,7 @@ export interface Permission {
 // 定义系统中所有权限，使用字符串字面量类型
 export type PermissionName = 
     | 'deployment:manage'      // 部署管理
-    | 'server:view_all'        // 查看所有服务器（仪表盘）
-    | 'server:view_basic'      // 查看基本服务器列表（如对局管理用）
+    | 'server:view_all'        // 查看所有服务器
     | 'server:view_details'    // 查看服务器详情
     | 'server:edit_config'     // 编辑服务器配置
     | 'server:delete'          // 删除服务器

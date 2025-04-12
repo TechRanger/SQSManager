@@ -11,7 +11,8 @@ const FluentRow: React.FC<FluentRowProps> = ({ children, className, ...props }) 
       className={`
         bg-white 
         shadow-sm 
-        rounded-md 
+        border-b border-gray-300
+        last:border-b-0
         transition-all 
         duration-200
         hover:bg-gray-50
@@ -29,8 +30,6 @@ const FluentRow: React.FC<FluentRowProps> = ({ children, className, ...props }) 
             className: `
               px-4 
               py-3.5
-              ${index === 0 ? 'rounded-l-md' : ''} 
-              ${index === React.Children.count(children) - 1 ? 'rounded-r-md' : ''}
               ${(child as any).props.className || ''}
             `
           });

@@ -8,10 +8,10 @@ interface FluentTableProps {
 
 const FluentTable: React.FC<FluentTableProps> = ({ headers, children, className }) => {
   return (
-    <div className={`overflow-x-auto rounded-lg shadow-sm border border-gray-200 ${className}`}>
-      <table className="min-w-full border-separate" style={{ borderSpacing: '0 0.75rem' }}>
+    <div className={`overflow-x-auto rounded-lg border border-gray-300 ${className}`}>
+      <table className="min-w-full border-collapse">
         <thead>
-          <tr className="bg-gray-50 border-b border-gray-200">
+          <tr className="bg-gray-50 border-b border-gray-300">
             {headers.map((header, index) => (
               <th
                 key={index}

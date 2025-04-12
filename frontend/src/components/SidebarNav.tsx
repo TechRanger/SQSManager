@@ -19,7 +19,7 @@ const SidebarNav: React.FC<SidebarNavProps> = ({ user, onLogout }) => {
 
   // Define navigation items
   const navItems = [
-    { path: "/dashboard", label: "仪表盘", icon: <LuLayoutDashboard />, requiredPermission: 'server:view_all' },
+    { path: "/dashboard", label: "仪表盘", icon: <LuLayoutDashboard /> },
     { path: "/game-sessions", label: "对局管理", icon: <LuGamepad2 />, requiredPermission: 'game_session:view' },
     { path: "/users", label: "用户管理", icon: <LuUsers />, requiredPermission: 'user:manage' },
     { path: "/settings", label: "用户设置", icon: <LuSettings />, requiredPermission: null },
@@ -52,8 +52,20 @@ const SidebarNav: React.FC<SidebarNavProps> = ({ user, onLogout }) => {
       {/* Navigation Links */}
       <nav className="flex-grow p-4 space-y-2">
         {user && navItems.map(item => {
-          const canView = item.requiredPermission ? hasPermission(item.requiredPermission) : true;
-          if (!canView) return null;
+          let canView = true; // Default to true
+
+          if (item.path === '/dashboard') {
+            // Custom check for Dashboard: requires view_details AND view_all
+            canView = hasPermission('server:view_details') && hasPermission('server:view_all');
+          } else if (item.requiredPermission) {
+            // Standard check for other items
+            canView = hasPermission(item.requiredPermission);
+          }
+
+          if (!canView) {
+             return null; // Hide if permission check fails
+           }
+           
           const active = isActive(item.path);
           return (
             <Link
