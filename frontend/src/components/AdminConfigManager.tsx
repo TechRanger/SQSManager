@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FullAdminConfig, AdminEntry } from '../types/admin-config';
 import { AddGroupDto } from '../types/add-group.dto';
 import { AddAdminDto } from '../types/add-admin.dto';
@@ -75,10 +75,12 @@ interface AdminConfigManagerProps {
     deleteAdminGroupApi: (serverId: number, groupName: string) => Promise<void>;
     addAdminApi: (serverId: number, adminData: AddAdminDto) => Promise<void>;
     deleteAdminApi: (serverId: number, steamId: string, groupName: string) => Promise<void>;
+    // 控制显示模式: "all" 显示所有内容, "groups" 只显示权限组, "admins" 只显示管理员分配
+    displayMode?: 'all' | 'groups' | 'admins';
 }
 
 const AdminConfigManager: React.FC<AdminConfigManagerProps> = ({
-    serverId, config, isLoading, error, onConfigReload, addAdminGroupApi, deleteAdminGroupApi, addAdminApi, deleteAdminApi
+    serverId, config, isLoading, error, onConfigReload, addAdminGroupApi, deleteAdminGroupApi, addAdminApi, deleteAdminApi, displayMode = 'all'
 }) => {
 
     const [isAddingGroup, setIsAddingGroup] = useState(false);
@@ -95,6 +97,21 @@ const AdminConfigManager: React.FC<AdminConfigManagerProps> = ({
     const [addAdminLoading, setAddAdminLoading] = useState(false);
     const [addAdminError, setAddAdminError] = useState<string | null>(null);
     const [deletingAdminKey, setDeletingAdminKey] = useState<string | null>(null);
+
+    // 添加调试钩子，检查config中的权限数据格式
+    useEffect(() => {
+        if (config && config.groups && config.groups.length > 0) {
+            console.log('AdminConfigManager received config:', config);
+            console.log('Checking permissions format for all groups:');
+            config.groups.forEach(group => {
+                console.log(`Group: ${group.name}`);
+                console.log(`Permissions type: ${typeof group.permissions}, isArray: ${Array.isArray(group.permissions)}`);
+                if (Array.isArray(group.permissions) && group.permissions.length > 0) {
+                    console.log(`First permission: ${JSON.stringify(group.permissions[0])}, type: ${typeof group.permissions[0]}`);
+                }
+            });
+        }
+    }, [config]);
 
     const handlePermissionToggle = (permission: string) => {
         setNewGroupPermissions(prev => {
@@ -117,9 +134,13 @@ const AdminConfigManager: React.FC<AdminConfigManagerProps> = ({
         setAddGroupLoading(true);
         setAddGroupError(null);
         try {
+            // 确保权限是字符串数组
+            const permissions = Array.from(newGroupPermissions);
+            console.log('Submitting new group with permissions:', permissions);
+            
             const groupData: AddGroupDto = {
                 name: newGroupName.trim(),
-                permissions: Array.from(newGroupPermissions)
+                permissions: permissions
             };
             await addAdminGroupApi(serverId, groupData);
             // Reset form and refresh config
@@ -209,22 +230,12 @@ const AdminConfigManager: React.FC<AdminConfigManagerProps> = ({
         }
     };
 
-    if (isLoading) return <p>正在加载管理员配置...</p>;
-    if (error) return <p style={{ color: 'red' }}>加载管理员配置失败: {error}</p>;
-    if (!config) return <p>未找到管理员配置信息。</p>;
-
-    // Group admins by group name for easier display
-    const adminsByGroup: { [groupName: string]: AdminEntry[] } = {};
-    config.admins.forEach(admin => {
-        if (!adminsByGroup[admin.groupName]) {
-            adminsByGroup[admin.groupName] = [];
-        }
-        adminsByGroup[admin.groupName].push(admin);
-    });
-
-    return (
-        <div className="space-y-fluent-xl">
-            {/* --- Groups Section --- */}
+    // 渲染权限组管理部分
+    const renderGroupsSection = () => {
+        // 确保config不为null
+        if (!config) return <p>未找到配置信息</p>;
+        
+        return (
             <section>
                 <div className="flex justify-between items-center mb-fluent-md">
                     <h4 className="text-lg font-semibold text-neutral-foreground">权限组</h4>
@@ -234,6 +245,7 @@ const AdminConfigManager: React.FC<AdminConfigManagerProps> = ({
                         disabled={addGroupLoading}
                         icon={isAddingGroup ? null : null}
                         size="small"
+                        className={isAddingGroup ? "" : "!bg-blue-600 !text-white font-bold"}
                     >
                         {isAddingGroup ? '取消添加' : '添加权限组'}
                     </FluentButton>
@@ -241,73 +253,133 @@ const AdminConfigManager: React.FC<AdminConfigManagerProps> = ({
 
                 {/* Add Group Form */}
                 {isAddingGroup && (
-                    <div className="p-fluent-lg border border-neutral-stroke rounded-fluent-md bg-neutral-background mb-fluent-md">
-                        <form onSubmit={handleAddGroupSubmit} className="space-y-fluent-md">
-                            <h5 className="text-md font-semibold text-neutral-foreground mb-fluent-sm">添加新权限组</h5>
-                            {addGroupError && <p className="text-sm text-danger">{addGroupError}</p>}
-                            <FluentInput 
-                                label="组名:"
-                                id="newGroupName"
-                                type="text" 
-                                value={newGroupName} 
-                                onChange={(e) => setNewGroupName(e.target.value)}
-                                required
-                                disabled={addGroupLoading}
-                                className="!mb-0"
-                            />
-                            <div>
-                                <label className="block text-sm font-medium text-neutral-secondary mb-fluent-xs">权限:</label>
-                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-fluent-sm text-xs border border-neutral-stroke p-fluent-sm rounded-fluent-sm bg-white">
-                                    {AVAILABLE_PERMISSIONS.map(perm => (
-                                        <label key={perm} className="flex items-center space-x-fluent-xs cursor-pointer">
-                                            <input 
-                                                type="checkbox" 
-                                                checked={newGroupPermissions.has(perm)}
-                                                onChange={() => handlePermissionToggle(perm)}
-                                                disabled={addGroupLoading}
-                                                className="focus:ring-brand text-brand rounded-sm"
-                                            />
-                                            <span className="select-none">{perm}</span>
-                                        </label>
-                                    ))}
-                                </div>
+                    <form onSubmit={handleAddGroupSubmit} className="mb-fluent-2xl border border-brand rounded-md p-4 bg-gradient-to-r from-blue-50 to-blue-100 space-y-4">
+                        <h5 className="text-md font-semibold text-blue-700">添加新权限组</h5>
+                        <FluentInput
+                            name="newGroupName"
+                            label="组名:"
+                            value={newGroupName}
+                            onChange={(e) => setNewGroupName(e.target.value)}
+                            required
+                            disabled={addGroupLoading}
+                            placeholder="例如: admin, moderator, etc"
+                            className="w-full"
+                        />
+                        
+                        <div>
+                            <label className="block text-sm font-medium text-neutral-secondary mb-2">权限:</label>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 text-xs border border-neutral-stroke p-4 rounded-fluent-sm bg-white">
+                                {AVAILABLE_PERMISSIONS.map(perm => (
+                                    <label key={perm} className="flex items-center space-x-2 cursor-pointer">
+                                        <input 
+                                            type="checkbox" 
+                                            checked={newGroupPermissions.has(perm)}
+                                            onChange={() => handlePermissionToggle(perm)}
+                                            disabled={addGroupLoading}
+                                            className="focus:ring-brand text-brand rounded-sm"
+                                        />
+                                        <span className="select-none">{perm}</span>
+                                    </label>
+                                ))}
                             </div>
-                            <div className="mt-fluent-sm">
-                                <FluentButton type="submit" variant="primary" disabled={addGroupLoading || !newGroupName.trim() || newGroupPermissions.size === 0} size="small">
-                                    {addGroupLoading ? '添加中...' : '确认添加组'}
-                                </FluentButton>
+                        </div>
+                        
+                        {/* 添加调试输出 */}
+                        <div className="mt-2 text-xs text-gray-500">
+                            <details>
+                                <summary>调试信息 (仅供开发使用)</summary>
+                                <pre className="mt-1 bg-gray-100 p-2 rounded whitespace-pre-wrap">
+                                    {config.groups.map(g => `组: ${g.name}, 权限类型: ${typeof g.permissions}, 内容: ${JSON.stringify(g.permissions)}`).join('\n')}
+                                </pre>
+                            </details>
+                        </div>
+                        
+                        <div className="flex justify-end space-x-fluent-sm">
+                            <FluentButton 
+                                type="button" 
+                                disabled={addGroupLoading} 
+                                onClick={() => setIsAddingGroup(false)}
+                                variant="secondary"
+                            >
+                                取消
+                            </FluentButton>
+                            <FluentButton 
+                                type="submit" 
+                                disabled={addGroupLoading || !newGroupName.trim() || newGroupPermissions.size === 0}
+                                variant="primary"
+                            >
+                                {addGroupLoading ? '添加中...' : '添加组'}
+                            </FluentButton>
+                        </div>
+                        
+                        {addGroupError && (
+                            <div className="mt-4 p-fluent-sm rounded bg-red-50 border border-red-200 text-red-700 text-sm">
+                                {addGroupError}
                             </div>
-                        </form>
-                    </div>
+                        )}
+                    </form>
                 )}
 
-                {/* Groups Table */}
-                {config.groups.length > 0 ? (
-                    <FluentTable headers={["组名", "权限", "操作"]} className="mt-fluent-md">
-                        {config.groups.map(group => (
-                            <FluentRow key={group.name}>
-                                <td className="whitespace-nowrap text-gray-700">{group.name}</td>
-                                <td className="whitespace-nowrap text-gray-500">{group.permissions.join(', ') || '无权限'}</td>
-                                <td className="whitespace-nowrap text-right">
+                {/* 显示当前组 */}
+                <div className="mt-fluent-md space-y-fluent-md">
+                    <h5 className="text-md font-medium text-neutral-foreground">当前权限组 ({config.groups.length})</h5>
+                    {config.groups.length === 0 ? (
+                        <p className="text-sm text-gray-500 italic">暂无权限组定义。</p>
+                    ) : (
+                        config.groups.map(group => (
+                            <div key={group.name} className="border border-gray-200 rounded-md overflow-hidden">
+                                <div className="bg-gray-50 p-3 border-b border-gray-200 flex justify-between items-center">
+                                    <h6 className="font-bold text-neutral-foreground">{group.name}</h6>
                                     <FluentButton
+                                        disabled={deletingGroup === group.name}
                                         variant="danger"
                                         size="small"
                                         onClick={() => handleDeleteGroup(group.name)}
-                                        disabled={deletingGroup === group.name}
-                                        icon={<Trash2 />}
+                                        icon={<Trash2 className="h-4 w-4" />}
                                     >
-                                        {deletingGroup === group.name ? '删除中...' : '删除组'}
+                                        删除
                                     </FluentButton>
-                                </td>
-                            </FluentRow>
-                        ))}
-                    </FluentTable>
-                ) : (
-                    <p className="text-sm text-neutral-secondary italic mt-fluent-md">还没有配置权限组。</p>
-                )}
+                                </div>
+                                <div className="p-3 text-sm">
+                                    <div className="mb-2 font-medium text-neutral-foreground">权限:</div>
+                                    <div className="flex flex-wrap gap-2">
+                                        {Array.isArray(group.permissions) && group.permissions.length > 0 ? (
+                                            group.permissions.map(perm => (
+                                                <span
+                                                    key={`${group.name}-${perm}`}
+                                                    className="inline-block px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs"
+                                                >
+                                                    {perm}
+                                                </span>
+                                            ))
+                                        ) : (
+                                            <span className="text-gray-500 italic">无权限</span>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
             </section>
+        );
+    };
 
-            {/* --- Admins Section --- */}
+    // 渲染管理员分配部分
+    const renderAdminsSection = () => {
+        // 确保config不为null
+        if (!config) return <p>未找到配置信息</p>;
+        
+        // Group admins by group name for easier display
+        const adminsByGroup: { [groupName: string]: AdminEntry[] } = {};
+        config.admins.forEach(admin => {
+            if (!adminsByGroup[admin.groupName]) {
+                adminsByGroup[admin.groupName] = [];
+            }
+            adminsByGroup[admin.groupName].push(admin);
+        });
+        
+        return (
             <section>
                 <div className="flex justify-between items-center mb-fluent-md">
                     <h4 className="text-lg font-semibold text-neutral-foreground">管理员分配</h4>
@@ -316,96 +388,129 @@ const AdminConfigManager: React.FC<AdminConfigManagerProps> = ({
                         onClick={() => { setIsAddingAdmin(prev => !prev); setAddAdminError(null); }}
                         disabled={addAdminLoading}
                         size="small"
+                        className={isAddingAdmin ? "" : "!bg-blue-600 !text-white font-bold"}
                     >
                         {isAddingAdmin ? '取消添加' : '添加管理员'}
                     </FluentButton>
                 </div>
 
-                 {/* Add Admin Form */}
+                {/* Add Admin Form */}
                 {isAddingAdmin && (
-                    <div className="p-fluent-lg border border-neutral-stroke rounded-fluent-md bg-neutral-background mb-fluent-md">
-                        <form onSubmit={handleAddAdminSubmit} className="space-y-fluent-md">
-                             <h5 className="text-md font-semibold text-neutral-foreground mb-fluent-sm">添加新管理员</h5>
-                             {addAdminError && <p className="text-sm text-danger">{addAdminError}</p>}
-                             <FluentInput 
-                                label="SteamID64:"
-                                id="newAdminSteamId"
-                                type="text" 
-                                value={newAdminSteamId} 
-                                onChange={(e) => setNewAdminSteamId(e.target.value)}
-                                required
-                                disabled={addAdminLoading}
-                                pattern="\d{17}" // Basic validation
-                                title="请输入 17 位数字的 SteamID64"
-                                placeholder="例如 76561198000000000"
-                             />
-                             <FluentSelect 
-                                label="权限组:"
-                                id="newAdminGroup"
-                                value={newAdminGroup}
-                                onChange={(e) => setNewAdminGroup(e.target.value)}
-                                required
-                                disabled={addAdminLoading || config.groups.length === 0}
-                                options={config.groups.map(group => ({ value: group.name, label: group.name }))}
-                             >
-                                <option value="" disabled>-- 选择一个组 --</option>
-                                {config.groups.map(group => (
-                                    <option key={group.name} value={group.name}>{group.name}</option>
-                                ))}
-                             </FluentSelect>
-                             {config.groups.length === 0 && <p className="text-xs text-warning">需要先创建权限组才能添加管理员。</p>}
-                             <FluentInput 
-                                label="注释 (可选):"
-                                id="newAdminComment"
-                                type="text" 
-                                value={newAdminComment} 
-                                onChange={(e) => setNewAdminComment(e.target.value)}
-                                disabled={addAdminLoading}
-                                placeholder="例如 玩家名称或备注"
-                             />
-                            <div className="mt-fluent-sm">
-                                <FluentButton type="submit" variant="primary" disabled={addAdminLoading || !newAdminSteamId.trim() || !newAdminGroup.trim() || !/^\d{17}$/.test(newAdminSteamId.trim())} size="small">
-                                    {addAdminLoading ? '添加中...' : '确认添加管理员'}
-                                </FluentButton>
-                            </div>
-                        </form>
-                    </div>
-                )}
-
-                {/* Admins List (Grouped) */}
-                {Object.keys(adminsByGroup).length > 0 ? (
-                    Object.entries(adminsByGroup).map(([groupName, adminsInGroup]) => (
-                        <div key={groupName} className="mb-fluent-lg">
-                            <h5 className="text-md font-semibold mb-fluent-sm text-neutral-secondary">组: {groupName}</h5>
-                            <FluentTable headers={["SteamID64", "注释", "操作"]} className="mt-fluent-sm">
-                                {adminsInGroup.map(admin => {
-                                    const key = `${admin.steamId}:${admin.groupName}`;
-                                    const isDeletingThis = deletingAdminKey === key;
-                                    return (
-                                        <FluentRow key={key}>
-                                            <td className="whitespace-nowrap text-gray-700 font-mono">{admin.steamId}</td>
-                                            <td className="text-gray-500">{admin.comment || '-'}</td>
-                                            <td className="whitespace-nowrap text-right">
-                                                <FluentButton 
-                                                    variant="danger" 
-                                                    size="small" 
-                                                    onClick={() => handleDeleteAdmin(admin.steamId, admin.groupName)}
-                                                    disabled={isDeletingThis}
-                                                >
-                                                    {isDeletingThis ? '删除中...' : '删除'}
-                                                </FluentButton>
-                                            </td>
-                                        </FluentRow>
-                                    );
-                                })}
-                            </FluentTable>
+                    <form onSubmit={handleAddAdminSubmit} className="mb-fluent-2xl border border-green-300 rounded-md p-4 bg-gradient-to-r from-green-50 to-green-100 space-y-4">
+                        <h5 className="text-md font-semibold text-green-700">添加新管理员</h5>
+                        <FluentInput 
+                            label="Steam ID 64:"
+                            type="text" 
+                            value={newAdminSteamId} 
+                            onChange={(e) => setNewAdminSteamId(e.target.value)}
+                            required
+                            disabled={addAdminLoading}
+                            placeholder="例如 76561198012345678 (17位数字)"
+                        />
+                        
+                        <FluentSelect 
+                            label="权限组:"
+                            id="newAdminGroup"
+                            value={newAdminGroup}
+                            onChange={(e) => setNewAdminGroup(e.target.value)}
+                            required
+                            disabled={addAdminLoading || config.groups.length === 0}
+                            options={config.groups.map(group => ({ value: group.name, label: group.name }))}
+                        >
+                            <option value="" disabled>-- 选择一个组 --</option>
+                            {config.groups.map(group => (
+                                <option key={group.name} value={group.name}>{group.name}</option>
+                            ))}
+                        </FluentSelect>
+                        {config.groups.length === 0 && <p className="text-xs text-warning">需要先创建权限组才能添加管理员。</p>}
+                        <FluentInput 
+                            label="注释 (可选):"
+                            id="newAdminComment"
+                            type="text" 
+                            value={newAdminComment} 
+                            onChange={(e) => setNewAdminComment(e.target.value)}
+                            disabled={addAdminLoading}
+                            placeholder="例如 玩家名称或备注"
+                        />
+                        
+                        <div className="flex justify-end space-x-fluent-sm">
+                            <FluentButton 
+                                type="button" 
+                                disabled={addAdminLoading} 
+                                onClick={() => setIsAddingAdmin(false)}
+                                variant="secondary"
+                            >
+                                取消
+                            </FluentButton>
+                            <FluentButton 
+                                type="submit" 
+                                disabled={addAdminLoading || !newAdminSteamId.trim() || !newAdminGroup || config.groups.length === 0}
+                                variant="primary"
+                            >
+                                {addAdminLoading ? '添加中...' : '添加管理员'}
+                            </FluentButton>
                         </div>
-                    ))
-                ) : (
-                    <p className="text-sm text-neutral-secondary italic mt-fluent-md">还没有分配管理员。</p>
+                        
+                        {addAdminError && (
+                            <div className="mt-4 p-fluent-sm rounded bg-red-50 border border-red-200 text-red-700 text-sm">
+                                {addAdminError}
+                            </div>
+                        )}
+                        
+                    </form>
                 )}
 
+                {/* Admins By Group List */}
+                <div className="mt-fluent-md space-y-fluent-xl">
+                    {Object.keys(adminsByGroup).length === 0 ? (
+                        <p className="text-sm text-gray-500 italic">暂无管理员分配。</p>
+                    ) : (
+                        Object.entries(adminsByGroup).map(([groupName, admins]) => (
+                            <div key={groupName} className="border border-gray-200 rounded-md overflow-hidden">
+                                <div className="bg-gray-50 p-3 border-b border-gray-200">
+                                    <h6 className="font-bold text-neutral-foreground">组: {groupName} ({admins.length})</h6>
+                                </div>
+                                <div className="p-0">
+                                    <FluentTable headers={["Steam ID", "注释", "操作"]}>
+                                        {admins.map((admin) => {
+                                            const key = `${admin.steamId}:${admin.groupName}`;
+                                            const isDeleting = deletingAdminKey === key;
+                                            return (
+                                                <FluentRow key={key}>
+                                                    <td className="whitespace-nowrap text-gray-700 font-mono">{admin.steamId}</td>
+                                                    <td className="text-gray-700 max-w-md truncate">{admin.comment || '-'}</td>
+                                                    <td className="whitespace-nowrap text-right">
+                                                        <FluentButton
+                                                            variant="danger"
+                                                            size="small"
+                                                            disabled={isDeleting || !!deletingAdminKey}
+                                                            onClick={() => handleDeleteAdmin(admin.steamId, admin.groupName)}
+                                                        >
+                                                            {isDeleting ? '删除中...' : '删除'}
+                                                        </FluentButton>
+                                                    </td>
+                                                </FluentRow>
+                                            );
+                                        })}
+                                    </FluentTable>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
             </section>
+        );
+    };
+
+    if (isLoading) return <p>正在加载管理员配置...</p>;
+    if (error) return <p style={{ color: 'red' }}>加载管理员配置失败: {error}</p>;
+    if (!config) return <p>未找到管理员配置信息。</p>;
+
+    // 根据displayMode显示相应的内容
+    return (
+        <div className="space-y-fluent-xl">
+            {(displayMode === 'all' || displayMode === 'groups') && renderGroupsSection()}
+            {(displayMode === 'all' || displayMode === 'admins') && renderAdminsSection()}
         </div>
     );
 };

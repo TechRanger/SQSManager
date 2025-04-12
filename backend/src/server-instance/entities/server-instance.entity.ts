@@ -29,11 +29,23 @@ export class ServerInstance {
   @Column({ nullable: true }) // 可选的额外启动参数
   extraArgs?: string;
 
+  @Column({ nullable: true })
+  description?: string; // 服务器描述
+
+  @Column({ default: 'Squad' })
+  game: string; // 游戏类型
+
+  @Column({ default: true })
+  rconEnabled: boolean; // 是否启用RCON
+
   // --- 运行时状态 (非数据库持久化，但方便管理) ---
   // These fields are not stored in the DB but managed in the service
   // isRunning: boolean = false;
   // pid?: number = null;
   // currentMap?: string = null;
   // playerCount?: number = null;
+
+  @Column({ default: false })
+  isRunning: boolean; // 服务器是否在运行中，将保存在数据库中
 
 } 

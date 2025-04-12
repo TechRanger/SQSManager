@@ -41,4 +41,8 @@ export class DeployInstanceDto {
   @IsOptional()
   @IsString()
   extraArgs?: string;
+
+  @IsOptional()
+  @IsString()
+  steamCmdPath?: string;
 } 

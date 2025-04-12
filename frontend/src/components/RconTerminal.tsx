@@ -81,6 +81,7 @@ const RconTerminal: React.FC<RconTerminalProps> = ({ serverId }) => {
                     disabled={isLoading || !input.trim()}
                     variant="primary"
                     icon={<LuTerminal />}
+                    className="!bg-blue-600 !text-white font-bold"
                     aria-label="Send RCON Command"
                 >
                     {isLoading ? '发送中...' : '发送'}

@@ -26,6 +26,12 @@ export class ServerInstanceController {
     return this.serverInstanceService.findAll();
   }
 
+  @Get('statuses')
+  @RequirePermissions('game_session:view')
+  async getAllStatuses(): Promise<any[]> {
+    return this.serverInstanceService.getAllStatuses();
+  }
+
   @Get(':id')
   @RequirePermissions('server:view_details')
   findOne(@Param('id') id: string): Promise<ServerInstance> {

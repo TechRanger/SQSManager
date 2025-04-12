@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, Logger, InternalServerErrorException, BadRequestException, ConflictException, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger, InternalServerErrorException, BadRequestException, ConflictException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateServerInstanceDto } from './dto/create-server-instance.dto';
@@ -25,7 +25,7 @@ interface RunningServerInfo {
 }
 
 @Injectable()
-export class ServerInstanceService implements OnModuleDestroy {
+export class ServerInstanceService implements OnModuleDestroy, OnModuleInit {
     private readonly logger = new Logger(ServerInstanceService.name);
     // Use the defined type for the map
     private runningServers: Map<number, RunningServerInfo> = new Map();
@@ -44,6 +44,39 @@ export class ServerInstanceService implements OnModuleDestroy {
         );
         await Promise.all(stopPromises);
         this.logger.log("所有服务器停止命令已发送。");
+    }
+
+    async onModuleInit() {
+        this.logger.log("服务启动，检查现有进程状态...");
+        await this.syncServerRunningStates();
+    }
+
+    // 初始化时同步服务器运行状态
+    private async syncServerRunningStates(): Promise<void> {
+        try {
+            // 获取所有数据库中标记为运行中的服务器
+            const runningServers = await this.serverInstanceRepository.find({ where: { isRunning: true } });
+            
+            if (runningServers.length > 0) {
+                this.logger.log(`发现数据库中有 ${runningServers.length} 台标记为运行中的服务器，正在检查实际状态...`);
+                
+                // 遍历运行中的服务器，检查其是否真的在运行
+                for (const server of runningServers) {
+                    const isActuallyRunning = this.runningServers.has(server.id);
+                    
+                    if (!isActuallyRunning) {
+                        this.logger.warn(`服务器 ${server.id} (${server.name}) 在数据库中标记为运行中，但实际未运行，正在更新状态...`);
+                        await this.updateServerRunningState(server.id, false);
+                    } else {
+                        this.logger.log(`服务器 ${server.id} (${server.name}) 状态正确同步。`);
+                    }
+                }
+            } else {
+                this.logger.log(`数据库中没有标记为运行中的服务器。`);
+            }
+        } catch (err: any) {
+            this.logger.error(`同步服务器运行状态时出错: ${err.message}`);
+        }
     }
 
     // Helper to safely access executable
@@ -378,6 +411,11 @@ Port=21114`; // Add a default port too
         this.logger.log(`尝试启动服务器 ${id} (${instance.name}): ${executablePath} ${args.join(' ')}`);
 
         try {
+            // 更新数据库中服务器实例的运行状态
+            instance.isRunning = true;
+            await this.serverInstanceRepository.save(instance);
+            this.logger.log(`已更新服务器 ${id} (${instance.name}) 状态为运行中`);
+
             const serverProcess = spawn(executablePath, args, {
                 cwd: instance.installPath, // Often better to run from install dir root
                 detached: process.platform !== 'win32', // Detach on non-Windows
@@ -405,36 +443,50 @@ Port=21114`; // Add a default port too
             });
 
             serverProcess.on('close', (code, signal) => {
-                 this.logger.log(`服务器进程 ${id} (${instance.name}) 已退出，退出码: ${code}, 信号: ${signal}`);
-                 const serverInfo = this.runningServers.get(id);
-                 if (serverInfo) {
-                     // Clear any pending RCON retry timeouts
-                     if (serverInfo.rconRetryTimeout) {
-                         clearTimeout(serverInfo.rconRetryTimeout);
-                     }
-                      // Attempt to close RCON connection if it exists
-                     if (serverInfo.rcon) {
-                         try {
-                             serverInfo.rcon.end();
-                             this.logger.log(`RCON 连接已关闭 (服务器 ${id} 退出)`);
-                         } catch (e: any) {
-                              this.logger.warn(`关闭 RCON 连接时出错 (服务器 ${id} 退出): ${e.message}`);
-                         }
-                     }
-                 }
-                 this.runningServers.delete(id); // Remove from running map
+                this.logger.log(`服务器进程 ${id} (${instance.name}) 已退出，退出码: ${code}, 信号: ${signal}`);
+                const serverInfo = this.runningServers.get(id);
+                if (serverInfo) {
+                    // Clear any pending RCON retry timeouts
+                    if (serverInfo.rconRetryTimeout) {
+                        clearTimeout(serverInfo.rconRetryTimeout);
+                    }
+                    // Attempt to close RCON connection if it exists
+                    if (serverInfo.rcon) {
+                        try {
+                            serverInfo.rcon.end();
+                            this.logger.log(`RCON 连接已关闭 (服务器 ${id} 退出)`);
+                        } catch (e: any) {
+                            this.logger.warn(`关闭 RCON 连接时出错 (服务器 ${id} 退出): ${e.message}`);
+                        }
+                    }
+                }
+                this.runningServers.delete(id); // Remove from running map
+                
+                // 更新数据库中的服务器状态为停止
+                this.updateServerRunningState(id, false).catch(err => {
+                    this.logger.error(`更新服务器 ${id} 状态为停止时出错: ${err.message}`);
+                });
             });
 
             serverProcess.on('error', (err) => {
                 this.logger.error(`启动服务器进程 ${id} (${instance.name}) 失败: ${err.message}`);
                 this.runningServers.delete(id); // Clean up map
-                // Rethrow as internal server error?
-                // throw new InternalServerErrorException(`启动服务器失败: ${err.message}`);
+                
+                // 更新数据库中的服务器状态为停止
+                this.updateServerRunningState(id, false).catch(err => {
+                    this.logger.error(`更新服务器 ${id} 状态为停止时出错: ${err.message}`);
+                });
             });
 
         } catch (error: any) {
             this.logger.error(`执行启动命令时出错 (服务器 ${id}): ${error}`);
             this.runningServers.delete(id); // Ensure cleanup
+            
+            // 发生错误时，确保服务器状态为停止
+            this.updateServerRunningState(id, false).catch(err => {
+                this.logger.error(`更新服务器 ${id} 状态为停止时出错: ${err.message}`);
+            });
+            
             throw new InternalServerErrorException(`启动服务器时发生意外错误`);
         }
     }
@@ -447,6 +499,10 @@ Port=21114`; // Add a default port too
         }
 
         this.logger.log(`尝试停止服务器实例 ${id} (${serverInfo.instance.name})...`);
+
+        // 更新数据库中服务器实例的运行状态
+        await this.updateServerRunningState(id, false);
+        this.logger.log(`已更新服务器 ${id} (${serverInfo.instance.name}) 状态为已停止`);
 
         // 1. Disconnect RCON if connected
          if (serverInfo.rcon) {
@@ -591,7 +647,20 @@ Port=21114`; // Add a default port too
 
         try {
             this.logger.log(`向服务器 ${id} (${serverInfo.instance.name}) 发送 RCON 命令: ${command}`);
-            const response = await serverInfo.rcon.send(command);
+            
+            // 设置一个Promise超时来处理无响应的命令
+            const timeoutPromise = new Promise<string>((_, reject) => {
+                setTimeout(() => {
+                    reject(new Error('RCON命令超时，服务器无响应'));
+                }, 5000); // 5秒超时
+            });
+            
+            // 创建RCON发送命令的Promise
+            const rconPromise = serverInfo.rcon.send(command);
+            
+            // 使用Promise.race来处理两者中先完成的那个
+            const response = await Promise.race([rconPromise, timeoutPromise]);
+            
             this.logger.debug(`服务器 ${id} RCON 响应: ${response}`);
             return response;
         } catch (err: any) {
@@ -600,6 +669,7 @@ Port=21114`; // Add a default port too
         }
     }
 
+    // 获取服务器状态
     async getStatus(id: number): Promise<any> {
         const instanceFromDb = await this.findOne(id); // Get base config
         const serverInfo = this.runningServers.get(id);
@@ -612,6 +682,10 @@ Port=21114`; // Add a default port too
         let currentLayer: string | null = null; // Added for Layer
         let currentFactions: string | null = null; // Added for Factions
         let nextMap: string | null = null;
+        // 添加玩家列表数组
+        let playersList: any[] = [];
+        // 添加最近离开的玩家列表
+        let disconnectedPlayersList: any[] = [];
 
         if (isRunning && serverInfo?.rcon?.authenticated) {
             rconStatus = 'Connected';
@@ -634,29 +708,130 @@ Port=21114`; // Add a default port too
 
                 // Parse player count - Only count active players
                 let activePlayerCount = 0;
-                let section: 'active' | 'disconnected' | 'other' = 'other';
-                for (const line of listPlayersResponse.split('\n')) {
-                    const trimmedLine = line.trim();
-                    // More robust section detection
-                    if (trimmedLine.startsWith('----- Active Players -----')) {
-                        section = 'active';
-                        this.logger.debug(`[${id}] Count Section changed to: active`);
-                        continue;
+                
+                // 解析玩家列表
+                const listPlayersOutput = listPlayersResponse.trim();
+                
+                // 调试输出完整的ListPlayers响应
+                this.logger.debug(`[${id}] 完整的ListPlayers响应:\n${listPlayersOutput}`);
+                
+                // 分隔Active Players和Disconnected Players两部分
+                const activeSectionMatch = listPlayersOutput.match(/----- Active Players -----([\s\S]*?)----- Recently Disconnected Players/);
+                
+                // 提取活跃玩家部分
+                const activePlayersSection = activeSectionMatch ? activeSectionMatch[1].trim() : '';
+                this.logger.debug(`[${id}] 分离出的活跃玩家部分:\n${activePlayersSection}`);
+                
+                // 提取最近离开玩家部分
+                const disconnectedSectionMatch = listPlayersOutput.match(/----- Recently Disconnected Players[^-]+([\s\S]*?)$/);
+                const disconnectedPlayersSection = disconnectedSectionMatch ? disconnectedSectionMatch[1].trim() : '';
+                this.logger.debug(`[${id}] 分离出的最近离开玩家部分:\n${disconnectedPlayersSection}`);
+                
+                // 按行分割活跃玩家部分
+                const activePlayerLines = activePlayersSection.split('\n').filter(line => line.trim());
+                
+                // 遍历每个活跃玩家的行
+                activePlayerLines.forEach((line, index) => {
+                    const playerLine = line.trim();
+                    
+                    // 解析玩家信息
+                    // 格式: ID: 0 | Online IDs: EOS: 000293eaece14ead884a03d845013409 steam: 76561199150162540 | Name: Bot007 | Team ID: 1 | Squad ID: N/A | Is Leader: False | Role: WPMC_Rifleman_01
+                    const playerInfo: any = {};
+                    
+                    // 解析ID
+                    const idMatch = playerLine.match(/ID:\s*(\d+)/);
+                    if (idMatch) playerInfo.id = idMatch[1].trim();
+                    
+                    // 解析EOS ID
+                    const eosIdMatch = playerLine.match(/EOS:\s*([a-zA-Z0-9]+)/);
+                    if (eosIdMatch) playerInfo.eosId = eosIdMatch[1].trim();
+                    
+                    // 解析Steam ID
+                    const steamIdMatch = playerLine.match(/steam:\s*(\d+)/);
+                    if (steamIdMatch) playerInfo.steamId = steamIdMatch[1].trim();
+                    
+                    // 解析名称
+                    const nameMatch = playerLine.match(/Name:\s*([^|]+)/);
+                    if (nameMatch) playerInfo.name = nameMatch[1].trim();
+                    
+                    // 解析队伍ID
+                    const teamIdMatch = playerLine.match(/Team ID:\s*([^|]+)/);
+                    if (teamIdMatch) playerInfo.team = teamIdMatch[1].trim();
+                    
+                    // 解析小队ID
+                    const squadIdMatch = playerLine.match(/Squad ID:\s*([^|]+)/);
+                    if (squadIdMatch) {
+                        const squadValue = squadIdMatch[1].trim();
+                        playerInfo.squad = squadValue === 'N/A' ? '无' : squadValue;
                     }
-                    // Match the exact string including [Max of 15]
-                    if (trimmedLine.startsWith('----- Recently Disconnected Players [Max of 15] -----')) {
-                        section = 'disconnected';
-                        this.logger.debug(`[${id}] Count Section changed to: disconnected, breaking loop.`);
-                        // Stop counting once we hit the disconnected section
-                        break;
+                    
+                    // 解析是否为小队长
+                    const isLeaderMatch = playerLine.match(/Is Leader:\s*([^|]+)/);
+                    if (isLeaderMatch) {
+                        const isLeaderValue = isLeaderMatch[1].trim().toLowerCase();
+                        playerInfo.isLeader = isLeaderValue === 'true';
                     }
-                    // Log before incrementing
-                    if (trimmedLine.startsWith('ID:')) {
-                         if (section === 'active') {
-                             activePlayerCount++;
-                         }
+                    
+                    // 解析角色
+                    const roleMatch = playerLine.match(/Role:\s*([^|]+)/);
+                    if (roleMatch) {
+                        const roleValue = roleMatch[1].trim();
+                        // 如果是行末，可能没有分隔符
+                        playerInfo.role = roleValue.split('|')[0].trim();
                     }
-                }
+                    
+                    // 默认Ping值
+                    playerInfo.ping = 0;
+                    
+                    // 如果玩家信息包含必要字段，添加到列表
+                    if ((playerInfo.name || playerInfo.steamId) && playerInfo.id !== undefined) {
+                        this.logger.debug(`[${id}] 解析到活跃玩家: ${JSON.stringify(playerInfo)}`);
+                        playersList.push(playerInfo);
+                        activePlayerCount++;
+                    }
+                });
+                
+                // 按行分割最近离开玩家部分
+                const disconnectedPlayerLines = disconnectedPlayersSection.split('\n').filter(line => line.trim());
+                
+                // 遍历每个离开玩家的行
+                disconnectedPlayerLines.forEach((line, index) => {
+                    const playerLine = line.trim();
+                    
+                    // 解析离开玩家信息
+                    // 格式: ID: 0 | Online IDs: EOS: 000293eaece14ead884a03d845013409 steam: 76561199150162540 | Since Disconnect: 03m.16s | Name:  Bot007
+                    const playerInfo: any = {};
+                    
+                    // 解析ID
+                    const idMatch = playerLine.match(/ID:\s*(\d+)/);
+                    if (idMatch) playerInfo.id = idMatch[1].trim();
+                    
+                    // 解析EOS ID
+                    const eosIdMatch = playerLine.match(/EOS:\s*([a-zA-Z0-9]+)/);
+                    if (eosIdMatch) playerInfo.eosId = eosIdMatch[1].trim();
+                    
+                    // 解析Steam ID
+                    const steamIdMatch = playerLine.match(/steam:\s*(\d+)/);
+                    if (steamIdMatch) playerInfo.steamId = steamIdMatch[1].trim();
+                    
+                    // 解析名称
+                    const nameMatch = playerLine.match(/Name:\s*([^$|]+)/);
+                    if (nameMatch) playerInfo.name = nameMatch[1].trim();
+                    
+                    // 解析离开时间
+                    const disconnectTimeMatch = playerLine.match(/Since Disconnect:\s*([^|]+)/);
+                    if (disconnectTimeMatch) playerInfo.disconnectTime = disconnectTimeMatch[1].trim();
+                    
+                    // 如果离开玩家信息包含必要字段，添加到列表
+                    if ((playerInfo.name || playerInfo.steamId) && playerInfo.id !== undefined) {
+                        this.logger.debug(`[${id}] 解析到离开玩家: ${JSON.stringify(playerInfo)}`);
+                        disconnectedPlayersList.push(playerInfo);
+                    }
+                });
+                
+                this.logger.debug(`[${id}] 最终解析出的活跃玩家数量: ${activePlayerCount}, 离开玩家数量: ${disconnectedPlayersList.length}`);
+                
+                // 设置总玩家数量
                 players = activePlayerCount;
 
                 // Parse current map/layer/factions
@@ -680,7 +855,7 @@ Port=21114`; // Add a default port too
         } else if (isRunning && serverInfo?.rconConnecting) {
             rconStatus = 'Connecting...';
         } else if (isRunning && !serverInfo?.rcon) {
-             rconStatus = 'Disconnected (Retrying...)';
+            rconStatus = 'Disconnected (Retrying...)';
         }
 
         return {
@@ -692,8 +867,29 @@ Port=21114`; // Add a default port too
             currentLevel: currentLevel,   // Return current level
             currentLayer: currentLayer,   // Return current layer
             currentFactions: currentFactions, // Return current factions
-            nextMap: nextMap
+            nextMap: nextMap,
+            players: playersList,          // 返回玩家列表
+            recentlyDisconnectedPlayers: disconnectedPlayersList
         };
+    }
+
+    // 获取所有服务器状态
+    async getAllStatuses(): Promise<any[]> {
+        // 获取所有运行中的服务器实例
+        const servers = await this.serverInstanceRepository.find({
+            where: { isRunning: true }
+        });
+        
+        // 如果没有运行中的服务器，返回空数组
+        if (!servers || servers.length === 0) {
+            return [];
+        }
+
+        // 获取每个服务器的状态
+        const statusPromises = servers.map(server => this.getStatus(server.id));
+        
+        // 等待所有状态查询完成
+        return Promise.all(statusPromises);
     }
 
     // --- Config Management --- //
@@ -763,12 +959,12 @@ Port=21114`; // Add a default port too
     }
 
     // TODO: Method to discover running Squad processes not started by this manager?
-     async loadRunningServersFromSystem(): Promise<void> {
-         this.logger.log("服务启动，检查现有进程... (功能待实现)");
-         // This is complex: requires platform-specific process listing (ps, tasklist),
-         // matching command lines/PIDs to stored configurations, checking ports.
-         // Placeholder for now.
-     }
+    async loadRunningServersFromSystem(): Promise<void> {
+        this.logger.log("服务启动，检查现有进程... (功能待实现)");
+        // This is complex: requires platform-specific process listing (ps, tasklist),
+        // matching command lines/PIDs to stored configurations, checking ports.
+        // Placeholder for now.
+    }
 
     async restart(id: number): Promise<void> {
         const serverInfo = this.runningServers.get(id);
@@ -1161,4 +1357,15 @@ Port=21114`; // Add a default port too
     }
 
     // --- End Admin Config Management ---
+
+    // 辅助方法：更新服务器的运行状态到数据库
+    private async updateServerRunningState(id: number, isRunning: boolean): Promise<void> {
+        try {
+            await this.serverInstanceRepository.update(id, { isRunning });
+            this.logger.log(`服务器 ${id} 的运行状态已更新为 ${isRunning ? '运行中' : '已停止'}`);
+        } catch (err: any) {
+            this.logger.error(`更新服务器 ${id} 的运行状态失败: ${err.message}`);
+            throw err;
+        }
+    }
 } 

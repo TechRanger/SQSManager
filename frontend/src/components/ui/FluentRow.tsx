@@ -14,9 +14,10 @@ const FluentRow: React.FC<FluentRowProps> = ({ children, className, ...props }) 
         rounded-md 
         transition-all 
         duration-200
-        hover:bg-blue-50
+        hover:bg-gray-50
         hover:shadow
         text-sm
+        font-medium
         ${className || ''}
       `} 
       {...props}
@@ -26,7 +27,7 @@ const FluentRow: React.FC<FluentRowProps> = ({ children, className, ...props }) 
           return React.cloneElement(child, {
             className: `
               px-4 
-              py-3 
+              py-3.5
               ${index === 0 ? 'rounded-l-md' : ''} 
               ${index === React.Children.count(children) - 1 ? 'rounded-r-md' : ''}
               ${child.props.className || ''}

@@ -13,6 +13,9 @@ export type PermissionName =
   | 'server:rcon'           // Send RCON commands via web UI
   | 'server:manage_bans_web'// Use Ban/Unban feature in web UI
   | 'server:manage_admins_web' // Add the new permission for Admins.cfg
+  | 'server:manage_plugins' // Manage server plugins (enable/disable)
+  // Game Session Management
+  | 'game_session:view'     // View active game sessions and their status
   // User Management
   | 'user:view'             // View list of users
   | 'user:create'           // Create new users

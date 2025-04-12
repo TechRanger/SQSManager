@@ -45,9 +45,15 @@ apiClient.interceptors.request.use(
 
 export const getServerInstances = () => apiClient.get('/server-instances');
 
+// 获取所有服务器实例的别名，用于对局管理页面
+export const getAllServerInstances = () => apiClient.get('/server-instances');
+
 export const getServerInstance = (id: number) => apiClient.get(`/server-instances/${id}`);
 
 export const getServerInstanceStatus = (id: number) => apiClient.get(`/server-instances/${id}/status`);
+
+// 获取所有服务器实例的状态
+export const getAllServerInstanceStatuses = () => apiClient.get('/server-instances/statuses');
 
 export const createServerInstance = (data: any) => apiClient.post('/server-instances', data);
 
@@ -111,6 +117,11 @@ export const deleteUser = (userId: number): Promise<void> => apiClient.delete(`/
 
 // --- Deployment API Call ---
 export const installServer = (installPath: string) => apiClient.post('/deployment/install', { installPath });
+
+// 添加部署服务器实例的API接口
+export const getDeployUrl = (deployData: any) => {
+  return `${baseURL}/deployment/deploy-instance-sse`;
+};
 
 // TODO: Add API calls for config file management if needed in frontend
 

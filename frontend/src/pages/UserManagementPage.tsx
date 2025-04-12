@@ -296,15 +296,16 @@ function UserManagementPage() {
           ];
 
     return (
-        <div className="space-y-fluent-lg">
+        <div className="space-y-fluent-2xl">
             {/* --- User Management Section --- */} 
             <Card title="用户管理">
-                <div className="flex justify-end mb-fluent-md">
+                <div className="flex justify-start mb-fluent-md">
                     <FluentButton 
                         variant={isAddingUser ? 'secondary' : 'primary'}
                         icon={<LuPlus />} 
                         onClick={() => { setIsAddingUser(prev => !prev); setAddUserError(null); }}
                         size="small"
+                        className={!isAddingUser ? "!bg-blue-600 !text-white font-bold" : ""}
                     >
                         {isAddingUser ? '取消添加' : '添加用户'}
                     </FluentButton>
@@ -313,11 +314,11 @@ function UserManagementPage() {
                 {/* Add User Form */} 
                 {isAddingUser && (
                     <div className="p-fluent-lg border border-neutral-stroke rounded-fluent-md bg-neutral-background mb-fluent-lg space-y-fluent-md">
-                        <h3 className="text-md font-semibold text-neutral-foreground">添加新用户</h3>
+                        <h3 className="text-md font-semibold text-neutral-foreground mb-4">添加新用户</h3>
                         {addUserError && (
-                           <AlertMessage type="error" message={addUserError} className="text-xs" />
+                           <AlertMessage type="error" message={addUserError} className="text-xs mb-4" />
                         )}
-                        <form onSubmit={handleAddUserSubmit} className="space-y-fluent-md">
+                        <form onSubmit={handleAddUserSubmit} className="space-y-6">
                             <FluentInput 
                                 label="用户名:"
                                 id="newUsername"
@@ -326,7 +327,7 @@ function UserManagementPage() {
                                 onChange={(e) => setNewUsername(e.target.value)}
                                 required
                                 disabled={addUserLoading}
-                                className="!mb-0 border border-neutral-stroke rounded-fluent-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
+                                className="border border-neutral-stroke rounded-fluent-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
                             />
                             <FluentInput 
                                 label="密码:"
@@ -337,7 +338,7 @@ function UserManagementPage() {
                                 required
                                 minLength={6}
                                 disabled={addUserLoading}
-                                className="!mb-0 border border-neutral-stroke rounded-fluent-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
+                                className="border border-neutral-stroke rounded-fluent-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
                             />
                             <FluentSelect 
                                 label="角色:"
@@ -347,9 +348,9 @@ function UserManagementPage() {
                                 options={roleOptions}
                                 required
                                 disabled={addUserLoading || rolesForUserLoading}
-                                className="!mb-0 border border-neutral-stroke rounded-fluent-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
+                                className="border border-neutral-stroke rounded-fluent-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
                             />
-                            <div className="flex justify-end space-x-fluent-sm">
+                            <div className="flex justify-end space-x-4 pt-4">
                                 <FluentButton type="button" variant="secondary" onClick={() => setIsAddingUser(false)} disabled={addUserLoading}>
                                     取消
                                 </FluentButton>
@@ -358,7 +359,7 @@ function UserManagementPage() {
                                     variant="primary" 
                                     disabled={addUserLoading || rolesForUserLoading}
                                     icon={<LuSave />} 
-                                    className="shadow-none hover:shadow-md"
+                                    className="!bg-blue-600 !text-white font-bold shadow-none hover:shadow-md"
                                 >
                                     {addUserLoading ? '添加中...' : '确认添加'}
                                 </FluentButton>
@@ -390,6 +391,7 @@ function UserManagementPage() {
                                         onClick={() => handleDeleteUser(user.id, user.username)}
                                         disabled={deletingUserId === user.id}
                                         icon={<LuTrash2 />}
+                                        className="!bg-red-600 !text-white font-bold"
                                     >
                                         {deletingUserId === user.id ? '删除中...' : '删除'}
                                     </FluentButton>
@@ -401,13 +403,14 @@ function UserManagementPage() {
             </Card>
 
             {/* --- Role & Permission Management Section --- */} 
-            <Card title="角色与权限管理">
-                <div className="flex justify-end mb-fluent-md">
+            <Card title="角色与权限管理" className="mt-16">
+                <div className="flex justify-start mb-fluent-md">
                     <FluentButton 
                         variant={isAddingRole ? 'secondary' : 'primary'} 
                         icon={<LuPlus />} 
                         onClick={() => { setIsAddingRole(prev => !prev); setAddRoleError(null); }}
                         size="small"
+                        className={!isAddingRole ? "!bg-blue-600 !text-white font-bold" : ""}
                     >
                         {isAddingRole ? '取消添加' : '添加角色'}
                     </FluentButton>
@@ -416,11 +419,11 @@ function UserManagementPage() {
                 {/* Add Role Form */} 
                  {isAddingRole && (
                     <div className="p-fluent-lg border border-neutral-stroke rounded-fluent-md bg-neutral-background mb-fluent-lg space-y-fluent-md">
-                        <h3 className="text-md font-semibold text-neutral-foreground">添加新角色</h3>
+                        <h3 className="text-md font-semibold text-neutral-foreground mb-4">添加新角色</h3>
                         {addRoleError && (
-                            <AlertMessage type="error" message={addRoleError} className="text-xs" />
+                            <AlertMessage type="error" message={addRoleError} className="text-xs mb-4" />
                         )}
-                        <form onSubmit={handleCreateRoleSubmit} className="space-y-fluent-md">
+                        <form onSubmit={handleCreateRoleSubmit} className="space-y-6">
                              <FluentInput 
                                 label="角色名称:"
                                 id="newRoleName"
@@ -429,8 +432,7 @@ function UserManagementPage() {
                                 onChange={(e) => setNewRoleName(e.target.value)}
                                 required
                                 disabled={addRoleLoading}
-                                className="!mb-0"
-                            />
+                             />
                              <FluentInput 
                                 label="描述 (可选):"
                                 id="newRoleDescription"
@@ -438,13 +440,12 @@ function UserManagementPage() {
                                 value={newRoleDescription}
                                 onChange={(e) => setNewRoleDescription(e.target.value)}
                                 disabled={addRoleLoading}
-                                className="!mb-0"
-                            />
-                            <div className="flex justify-end space-x-fluent-sm">
+                             />
+                            <div className="flex justify-end space-x-4 pt-4">
                                 <FluentButton type="button" variant="secondary" onClick={() => setIsAddingRole(false)} disabled={addRoleLoading}>
                                     取消
                                 </FluentButton>
-                                <FluentButton type="submit" variant="primary" disabled={addRoleLoading}>
+                                <FluentButton type="submit" variant="primary" disabled={addRoleLoading} className="!bg-blue-600 !text-white font-bold">
                                     {addRoleLoading ? '添加中...' : '确认添加'}
                                 </FluentButton>
                             </div>
@@ -468,6 +469,19 @@ function UserManagementPage() {
                             <FluentRow key={role.id}>
                                 <td className="whitespace-nowrap text-gray-700">{role.name}</td>
                                 <td className="text-gray-500">{role.description || '-'}</td>
+                                <td className="text-gray-500">
+                                    {role.permissions && role.permissions.length > 0 ? (
+                                        <div className="max-h-20 overflow-y-auto text-xs">
+                                            {role.permissions.map(p => (
+                                                <div key={p.id} className="bg-gray-100 rounded-md px-2 py-1 mb-1 inline-block mr-1">
+                                                    {p.name}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <span className="text-gray-400">无权限</span>
+                                    )}
+                                </td>
                                 <td className="whitespace-nowrap text-right">
                                     <div className="flex justify-end space-x-2">
                                         <FluentButton
@@ -485,6 +499,7 @@ function UserManagementPage() {
                                                 onClick={() => handleDeleteRole(role.id, role.name)}
                                                 disabled={deletingRoleId === role.id}
                                                 icon={<LuTrash2 />}
+                                                className="!bg-red-600 !text-white font-bold"
                                             >
                                                 {deletingRoleId === role.id ? '删除中...' : '删除'}
                                             </FluentButton>
@@ -525,7 +540,7 @@ function UserManagementPage() {
                                                 disabled={assigningPermissionsLoading}
                                                 className="rounded text-brand focus:ring-brand border-neutral-stroke"
                                              />
-                                             <span className="text-neutral-foreground">{`${permission.action}:${permission.resource}`}</span>
+                                             <span className="text-neutral-foreground">{permission.name}</span>
                                          </label>
                                      ))}
                                  </div>

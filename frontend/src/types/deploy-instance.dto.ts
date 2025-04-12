@@ -7,4 +7,5 @@ export interface DeployInstanceDto {
     beaconPort: number;
     rconPassword: string;
     extraArgs?: string;
+    steamCmdPath?: string;
 } 

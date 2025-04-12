@@ -1,8 +1,14 @@
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { installServer } from '../services/api'; // We need to add this to api.ts
+import { useAuth } from '../context/AuthContext';
+import Card from '../components/ui/Card';
+import AlertMessage from '../components/ui/AlertMessage';
+import FluentButton from '../components/ui/FluentButton';
 
 function DeploymentPage() {
+    const { hasPermission } = useAuth(); // 获取权限检查函数
+    const navigate = useNavigate();
     const [installPath, setInstallPath] = useState<string>('');
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [message, setMessage] = useState<string | null>(null);
@@ -29,6 +35,28 @@ function DeploymentPage() {
             setIsLoading(false);
         }
     };
+
+    // 检查用户是否有部署权限
+    if (!hasPermission('deployment:manage')) {
+        return (
+            <div>
+                <h2>部署新的 Squad 服务器</h2>
+                <Card>
+                    <AlertMessage 
+                        type="error" 
+                        message="错误，没有相关权限。您需要 'deployment:manage' 权限才能访问此页面。" 
+                        className="mb-4"
+                    />
+                    <FluentButton 
+                        onClick={() => navigate('/')}
+                        className="bg-blue-600 text-white"
+                    >
+                        返回首页
+                    </FluentButton>
+                </Card>
+            </div>
+        );
+    }
 
     return (
         <div>
