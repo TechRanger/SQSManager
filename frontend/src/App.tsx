@@ -9,10 +9,12 @@ import UserManagementPage from './pages/UserManagementPage';
 import DeployServerPage from './pages/DeployServerPage';
 import GameSessionManagementPage from './pages/GameSessionManagementPage';
 import GameSessionDetailsPage from './pages/GameSessionDetailsPage';
+import ServerUpdatePage from './pages/ServerUpdatePage';
 import NotFoundPage from './pages/NotFoundPage';
 import './App.css';
 import './index.css';
 import SidebarNav from './components/SidebarNav';
+import ProtectedRoute from './components/ProtectedRoute';
 
 // 新增：自动重定向组件
 function HomeRedirect() {
@@ -64,14 +66,51 @@ function App() {
           <Routes>
             {/* 根路径使用自动重定向组件 */}
             <Route path="/" element={<HomeRedirect />} />
-            {/* 添加仪表盘专用路由 */}
-            <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/servers/:id" element={<ServerDetailsPage />} />
-            <Route path="/deploy" element={<DeployServerPage />} />
-            <Route path="/game-sessions" element={<GameSessionManagementPage />} />
-            <Route path="/game-sessions/:id" element={<GameSessionDetailsPage />} />
-            <Route path="/users" element={<UserManagementPage />} />
+            {/* 仪表盘专用路由 */}
+            <Route path="/dashboard" element={
+              <ProtectedRoute requiredPermission="server:control">
+                <DashboardPage />
+              </ProtectedRoute>
+            } />
+            {/* 服务器详情 */}
+            <Route path="/servers/:id" element={
+              <ProtectedRoute requiredPermission="server:view_details">
+                <ServerDetailsPage />
+              </ProtectedRoute>
+            } />
+            {/* 新增：服务器更新页面 */}
+            <Route path="/servers/:id/update" element={
+              <ProtectedRoute requiredPermission="server:update">
+                <ServerUpdatePage />
+              </ProtectedRoute>
+            } />
+            {/* 部署页面 */}
+            <Route path="/deploy" element={
+              <ProtectedRoute requiredPermission="deployment:manage">
+                <DeployServerPage />
+              </ProtectedRoute>
+            } />
+            {/* 对局管理 */}
+            <Route path="/game-sessions" element={
+              <ProtectedRoute requiredPermission="game_session:view">
+                <GameSessionManagementPage />
+              </ProtectedRoute>
+            } />
+            {/* 对局详情 */}
+            <Route path="/game-sessions/:id" element={
+              <ProtectedRoute requiredPermission="game_session:view">
+                <GameSessionDetailsPage />
+              </ProtectedRoute>
+            } />
+            {/* 用户管理 */}
+            <Route path="/users" element={
+              <ProtectedRoute requiredPermission="user:manage">
+                <UserManagementPage />
+              </ProtectedRoute>
+            } />
+            {/* 用户设置 */}
             <Route path="/settings" element={<UserSettingsPage />} />
+            {/* 404 */}
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </div>

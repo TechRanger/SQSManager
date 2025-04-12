@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { getServerInstance, getServerInstanceStatus, startServerInstance, stopServerInstance, restartServerInstance, updateServerInstance, getAdminConfig, addAdminGroup, deleteAdminGroup, addAdmin, deleteAdmin } from '../services/api';
-import { LuSave, LuX, LuPencil, LuPlay, LuSquare, LuPower, LuRotateCcw, LuArrowLeft, LuShield, LuUsers } from "react-icons/lu";
+import { getServerInstance, getServerInstanceStatus, startServerInstance, stopServerInstance, restartServerInstance, updateServerInstance, updateServerGameFiles, getAdminConfig, addAdminGroup, deleteAdminGroup, addAdmin, deleteAdmin } from '../services/api';
+import { LuSave, LuX, LuPencil, LuPlay, LuSquare, LuPower, LuRotateCcw, LuArrowLeft, LuShield, LuUsers, LuArrowDownToLine } from "react-icons/lu";
 // Import shared UI components
 import FluentButton from '../components/ui/FluentButton';
 import Card from '../components/ui/Card';
@@ -11,6 +11,8 @@ import LoadingSpinner from '../components/ui/LoadingSpinner';
 import AlertMessage from '../components/ui/AlertMessage';
 import { FullAdminConfig } from '../types/admin-config';
 import AdminConfigManager from '../components/AdminConfigManager';
+import { useAuth } from '../context/AuthContext';
+import InputModal from '../components/ui/InputModal';
 
 // 按部分显示AdminConfigManager组件的新props定义
 interface AdminGroupsSectionProps {
@@ -126,12 +128,13 @@ type EditableServerData = Pick<ServerDetails, 'name' | 'installPath' | 'gamePort
 function ServerDetailsPage() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
+    const { hasPermission } = useAuth();
     const serverId = id ? parseInt(id, 10) : null;
     const [server, setServer] = useState<ServerDetails | null>(null);
     const [status, setStatus] = useState<ServerDetails | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [actionLoading, setActionLoading] = useState<'idle' | 'pending' | 'restarting' | 'saving'>('idle');
+    const [actionLoading, setActionLoading] = useState<'idle' | 'pending' | 'restarting' | 'saving' | 'updating'>('idle');
     const [isEditing, setIsEditing] = useState(false);
     const [editableServerData, setEditableServerData] = useState<Partial<EditableServerData>>({});
     const [statusLoading, setStatusLoading] = useState(false);
@@ -141,6 +144,9 @@ function ServerDetailsPage() {
     const [adminConfig, setAdminConfig] = useState<FullAdminConfig | null>(null);
     const [adminConfigLoading, setAdminConfigLoading] = useState(false);
     const [adminConfigError, setAdminConfigError] = useState<string | null>(null);
+
+    const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
+    const [steamCmdPath, setSteamCmdPath] = useState(localStorage.getItem('steamCmdPath') || 'steamcmd');
 
     const fetchServerDetails = useCallback(async (showLoadingIndicator = false) => {
         if (!serverId) return;
@@ -325,6 +331,42 @@ function ServerDetailsPage() {
          // setLoading(false) will be called by fetchServerDetails after refresh
      };
 
+    // --- Function to open the modal ---
+    const openUpdateModal = () => {
+        // Reset to last known path when opening
+        setSteamCmdPath(localStorage.getItem('steamCmdPath') || 'steamcmd');
+        setIsUpdateModalOpen(true);
+    };
+
+    // --- Modified function to handle Update submission from modal ---
+    const handleUpdateAction = async (submittedPath: string) => {
+        if (!serverId) return;
+        
+        const finalPath = submittedPath.trim();
+        if (!finalPath) { // Should be caught by modal disable logic, but double check
+            setError('SteamCMD path cannot be empty.');
+            return;
+        }
+
+        // Save the path for next time
+        localStorage.setItem('steamCmdPath', finalPath);
+        setSteamCmdPath(finalPath); // Update state as well
+
+        setActionLoading('updating');
+        setError(null);
+        setIsUpdateModalOpen(false); // Close modal before navigation
+        
+        try {
+            await updateServerGameFiles(serverId, finalPath); 
+            navigate(`/servers/${serverId}/update`);
+        } catch (err: any) {
+            console.error("启动更新失败:", err);
+            setError(err.response?.data?.message || '启动更新过程失败。');
+            setActionLoading('idle');
+        } 
+    };
+    // --- End Update Action --- 
+
     if (loading) {
         return <div className="p-fluent-3xl text-center">
             <LoadingSpinner text="加载服务器详情..." />
@@ -357,7 +399,7 @@ function ServerDetailsPage() {
 
             {/* Non-critical Error Display */}
             {error && !loading && (
-                 <AlertMessage type="error" message={error} />
+                <AlertMessage type="error" message={error} />
             )}
 
             {/* Grid for Cards */}
@@ -365,7 +407,39 @@ function ServerDetailsPage() {
                 
                 {/* --- Instance Info & Control Card (Column 1) --- */}
                 <div className="lg:col-span-2">
-                    <Card title="实例信息 & 控制">
+                    <Card title={
+                        <div className="flex items-center justify-between w-full">
+                            <span>服务器基本参数</span>
+                            <div className="flex items-center">
+                                {!isEditing && (
+                                    <FluentButton 
+                                        variant="secondary" 
+                                        onClick={toggleEditMode} 
+                                        disabled={isActionInProgress || loading || isServerRunning}
+                                        title={isServerRunning ? "停止服务器后才能编辑" : "编辑配置"}
+                                        icon={<LuPencil />}
+                                        size="small"
+                                        className={`ml-2 !px-2 !py-1 ${isActionInProgress || loading || isServerRunning ? '' : '!bg-blue-100 hover:!bg-blue-200'}`} 
+                                    >
+                                        编辑
+                                    </FluentButton>
+                                )}
+                                {hasPermission('server:update') && !isEditing && (
+                                    <FluentButton
+                                        variant="secondary"
+                                        onClick={openUpdateModal}
+                                        disabled={isActionInProgress || isServerRunning}
+                                        title={isServerRunning ? "服务器运行时无法更新" : "更新游戏文件"}
+                                        icon={<LuArrowDownToLine />}
+                                        size="small"
+                                        className={`ml-2 !px-2 !py-1 ${isActionInProgress || isServerRunning ? '' : '!bg-teal-100 hover:!bg-teal-200'}`} 
+                                    >
+                                        {(actionLoading === 'updating') ? '更新中...' : '版本更新'}
+                                    </FluentButton>
+                                )}
+                            </div>
+                        </div>
+                    }>
                         {isEditing ? (
                             <form onSubmit={(e) => { e.preventDefault(); handleSaveChanges(); }} className="space-y-6">
                                 <FluentInput 
@@ -458,8 +532,8 @@ function ServerDetailsPage() {
                                 <p><strong>RCON 端口:</strong> {server.rconPort}</p>
                                 <p><strong>信标端口:</strong> {server.beaconPort}</p>
                                 <p><strong>额外参数:</strong> <span className="font-mono bg-gray-50 px-2 py-1 rounded">{server.extraArgs || '无'}</span></p>
-                                <div className="flex justify-between items-center pt-6 mt-6 bg-gradient-to-r from-white via-gray-50 to-white">
-                                    <div className="flex space-x-fluent-sm">
+                                <div className="flex justify-start items-center pt-6 mt-6">
+                                    <div className="flex space-x-4">
                                         {!isServerRunning ? (
                                             <FluentButton 
                                                 variant="primary" 
@@ -481,21 +555,18 @@ function ServerDetailsPage() {
                                                 >
                                                     {actionLoading === 'pending' ? '停止中...' : '停止'}
                                                 </FluentButton>
-                                                <FluentButton variant="secondary" onClick={() => handleControlAction('restart')} disabled={isActionInProgress || loading || isEditing} icon={<LuPower />}>
+                                                <FluentButton 
+                                                  variant="secondary" 
+                                                  onClick={() => handleControlAction('restart')} 
+                                                  disabled={isActionInProgress || loading || isEditing} 
+                                                  icon={<LuPower />}
+                                                  className={`!bg-blue-500 !text-white hover:!bg-blue-600 ${actionLoading === 'restarting' ? '!bg-blue-400 !opacity-80' : ''}`}
+                                                >
                                                     {actionLoading === 'restarting' ? '重启中...' : '重启'}
                                                 </FluentButton>
                                             </>
                                         )}
                                     </div>
-                                    <FluentButton 
-                                        variant="secondary" 
-                                        onClick={toggleEditMode} 
-                                        disabled={isActionInProgress || loading || isServerRunning}
-                                        title={isServerRunning ? "停止服务器后才能编辑" : "编辑配置"}
-                                        icon={<LuPencil />}
-                                    >
-                                        编辑
-                                    </FluentButton>
                                 </div>
                             </div>
                         )}
@@ -562,6 +633,19 @@ function ServerDetailsPage() {
                      </Card>
                 </div>
             </div>
+
+            {/* Render the Input Modal */}
+            <InputModal
+                isOpen={isUpdateModalOpen}
+                onClose={() => setIsUpdateModalOpen(false)}
+                onSubmit={handleUpdateAction}
+                title="输入 SteamCMD 路径"
+                label="SteamCMD 可执行文件路径"
+                initialValue={steamCmdPath}
+                placeholder="例如: C:\steamcmd\steamcmd.exe 或 /usr/bin/steamcmd"
+                submitText="开始更新"
+                cancelText="取消"
+            />
         </div>
     );
 }

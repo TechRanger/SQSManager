@@ -18,6 +18,7 @@ import { Role } from './role/entities/role.entity';
 import { SeedModule } from './seed/seed.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './permission/guards/permissions.guard';
+import { SharedModule } from './shared/shared.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { PermissionsGuard } from './permission/guards/permissions.guard';
       synchronize: true, // 开发阶段自动创建数据库表 (生产环境不要用)
       autoLoadEntities: true, // 自动加载实体
     }),
+    SharedModule,
     ServerInstanceModule, // 导入我们的服务器实例模块
     DeploymentModule,
     UserModule,

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, HttpCode, HttpStatus, BadRequestException, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, HttpCode, HttpStatus, BadRequestException, UseGuards, ValidationPipe } from '@nestjs/common';
 import { ServerInstanceService } from './server-instance.service';
 import { CreateServerInstanceDto } from './dto/create-server-instance.dto';
 import { UpdateServerInstanceDto } from './dto/update-server-instance.dto';
@@ -9,6 +9,7 @@ import { FullAdminConfig } from './dto/admin-config.dto';
 import { AddGroupDto } from './dto/add-group.dto';
 import { AddAdminDto } from './dto/add-admin.dto';
 import { RequirePermissions } from '../permission/decorators/require-permissions.decorator';
+import { UpdateGameFilesDto } from './dto/update-game-files.dto';
 
 @Controller('api/server-instances')
 export class ServerInstanceController {
@@ -115,6 +116,17 @@ export class ServerInstanceController {
   @RequirePermissions('server:manage_bans_web')
   async unbanPlayer(@Param('id') id: string, @Body() unbanDto: UnbanDto): Promise<void> {
       return this.serverInstanceService.unbanPlayer(+id, unbanDto.lineContent);
+  }
+
+  @Post(':id/update-game')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @RequirePermissions('server:update')
+  async updateGameFiles(
+    @Param('id') id: string, 
+    @Body(new ValidationPipe()) updateDto: UpdateGameFilesDto
+  ): Promise<{ message: string }> {
+     await this.serverInstanceService.updateGameFiles(+id, updateDto.steamCmdPath);
+     return { message: 'Update process started successfully.' };
   }
 
   @Get(':id/admin-config')

@@ -65,6 +65,10 @@ export const stopServerInstance = (id: number) => apiClient.post(`/server-instan
 
 export const restartServerInstance = (id: number) => apiClient.post(`/server-instances/${id}/restart`);
 
+// Modified API call for updating game files
+export const updateServerGameFiles = (id: number, steamCmdPath: string): Promise<{ message: string }> => 
+    apiClient.post(`/server-instances/${id}/update-game`, { steamCmdPath }); // Send path in body
+
 export const deleteServerInstance = (id: number) => apiClient.delete(`/server-instances/${id}`);
 
 export const sendRconCommand = (id: number, command: string) => apiClient.post(`/server-instances/${id}/rcon`, { command });

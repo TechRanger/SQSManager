@@ -385,8 +385,21 @@ const AdminConfigManager: React.FC<AdminConfigManagerProps> = ({
                     <h4 className="text-lg font-semibold text-neutral-foreground">管理员分配</h4>
                     <FluentButton 
                         variant={isAddingAdmin ? 'secondary' : 'primary'}
-                        onClick={() => { setIsAddingAdmin(prev => !prev); setAddAdminError(null); }}
-                        disabled={addAdminLoading}
+                        onClick={() => {
+                            const nextIsAddingAdmin = !isAddingAdmin;
+                            setIsAddingAdmin(nextIsAddingAdmin);
+                            setAddAdminError(null); // Reset error on toggle
+                            // If opening the form and groups exist, pre-select the first group
+                            if (nextIsAddingAdmin && config?.groups?.length > 0) {
+                                setNewAdminGroup(config.groups[0].name);
+                            } else if (!nextIsAddingAdmin) {
+                                // If closing the form via the toggle, reset fields
+                                setNewAdminGroup('');
+                                setNewAdminSteamId('');
+                                setNewAdminComment('');
+                            }
+                        }}
+                        disabled={addAdminLoading} // Disable toggle only if an add is in progress
                         size="small"
                         className={isAddingAdmin ? "" : "!bg-blue-600 !text-white font-bold"}
                     >
@@ -395,70 +408,88 @@ const AdminConfigManager: React.FC<AdminConfigManagerProps> = ({
                 </div>
 
                 {/* Add Admin Form */}
-                {isAddingAdmin && (
-                    <form onSubmit={handleAddAdminSubmit} className="mb-fluent-2xl border border-green-300 rounded-md p-4 bg-gradient-to-r from-green-50 to-green-100 space-y-4">
-                        <h5 className="text-md font-semibold text-green-700">添加新管理员</h5>
-                        <FluentInput 
-                            label="Steam ID 64:"
-                            type="text" 
-                            value={newAdminSteamId} 
-                            onChange={(e) => setNewAdminSteamId(e.target.value)}
-                            required
-                            disabled={addAdminLoading}
-                            placeholder="例如 76561198012345678 (17位数字)"
-                        />
-                        
-                        <FluentSelect 
-                            label="权限组:"
-                            id="newAdminGroup"
-                            value={newAdminGroup}
-                            onChange={(e) => setNewAdminGroup(e.target.value)}
-                            required
-                            disabled={addAdminLoading || config.groups.length === 0}
-                            options={config.groups.map(group => ({ value: group.name, label: group.name }))}
-                        >
-                            <option value="" disabled>-- 选择一个组 --</option>
-                            {config.groups.map(group => (
-                                <option key={group.name} value={group.name}>{group.name}</option>
-                            ))}
-                        </FluentSelect>
-                        {config.groups.length === 0 && <p className="text-xs text-warning">需要先创建权限组才能添加管理员。</p>}
-                        <FluentInput 
-                            label="注释 (可选):"
-                            id="newAdminComment"
-                            type="text" 
-                            value={newAdminComment} 
-                            onChange={(e) => setNewAdminComment(e.target.value)}
-                            disabled={addAdminLoading}
-                            placeholder="例如 玩家名称或备注"
-                        />
-                        
-                        <div className="flex justify-end space-x-fluent-sm">
-                            <FluentButton 
-                                type="button" 
-                                disabled={addAdminLoading} 
-                                onClick={() => setIsAddingAdmin(false)}
-                                variant="secondary"
+                {isAddingAdmin && (() => {
+                    // 计算禁用状态并添加日志
+                    const isSteamIdEmpty = !newAdminSteamId.trim();
+                    const isGroupEmpty = !newAdminGroup;
+                    const hasNoGroups = config.groups.length === 0;
+                    const isSteamIdInvalid = !/^\d{17}$/.test(newAdminSteamId.trim());
+                    const isButtonDisabled = addAdminLoading || isSteamIdEmpty || isGroupEmpty || hasNoGroups || isSteamIdInvalid;
+
+                    console.log('Add Admin Button Disabled Check:', {
+                        addAdminLoading,
+                        isSteamIdEmpty,
+                        isGroupEmpty,
+                        hasNoGroups,
+                        isSteamIdInvalid,
+                        finalDisabled: isButtonDisabled
+                    });
+
+                    return (
+                        <form onSubmit={handleAddAdminSubmit} className="mb-fluent-2xl border border-green-300 rounded-md p-4 bg-gradient-to-r from-green-50 to-green-100 space-y-4">
+                            <h5 className="text-md font-semibold text-green-700">添加新管理员</h5>
+                            <FluentInput 
+                                label="Steam ID 64:"
+                                type="text" 
+                                value={newAdminSteamId} 
+                                onChange={(e) => setNewAdminSteamId(e.target.value)}
+                                required
+                                disabled={addAdminLoading}
+                                placeholder="例如 76561198012345678 (17位数字)"
+                            />
+                            
+                            <FluentSelect 
+                                label="权限组:"
+                                id="newAdminGroup"
+                                value={newAdminGroup}
+                                onChange={(e) => setNewAdminGroup(e.target.value)}
+                                required
+                                disabled={addAdminLoading || hasNoGroups}
+                                options={config.groups.map(group => ({ value: group.name, label: group.name }))}
                             >
-                                取消
-                            </FluentButton>
-                            <FluentButton 
-                                type="submit" 
-                                disabled={addAdminLoading || !newAdminSteamId.trim() || !newAdminGroup || config.groups.length === 0}
-                                variant="primary"
-                            >
-                                {addAdminLoading ? '添加中...' : '添加管理员'}
-                            </FluentButton>
-                        </div>
-                        
-                        {addAdminError && (
-                            <div className="mt-4 p-fluent-sm rounded bg-red-50 border border-red-200 text-red-700 text-sm">
-                                {addAdminError}
+                                <option value="" disabled>-- 选择一个组 --</option>
+                                {config.groups.map(group => (
+                                    <option key={group.name} value={group.name}>{group.name}</option>
+                                ))}
+                            </FluentSelect>
+                            {hasNoGroups && <p className="text-xs text-warning">需要先创建权限组才能添加管理员。</p>}
+                            <FluentInput 
+                                label="注释 (可选):"
+                                id="newAdminComment"
+                                type="text" 
+                                value={newAdminComment} 
+                                onChange={(e) => setNewAdminComment(e.target.value)}
+                                disabled={addAdminLoading}
+                                placeholder="例如 玩家名称或备注"
+                            />
+                            
+                            <div className="flex justify-end space-x-fluent-sm">
+                                <FluentButton 
+                                    type="button" 
+                                    disabled={addAdminLoading} 
+                                    onClick={() => setIsAddingAdmin(false)}
+                                    variant="secondary"
+                                >
+                                    取消
+                                </FluentButton>
+                                <FluentButton 
+                                    type="submit" 
+                                    disabled={isButtonDisabled}
+                                    variant="primary"
+                                >
+                                    {addAdminLoading ? '添加中...' : '添加管理员'}
+                                </FluentButton>
                             </div>
-                        )}
-                        
-                    </form>
-                )}
+                            
+                            {addAdminError && (
+                                <div className="mt-4 p-fluent-sm rounded bg-red-50 border border-red-200 text-red-700 text-sm">
+                                    {addAdminError}
+                                </div>
+                            )}
+                            
+                        </form>
+                    );
+                })()}
 
                 {/* Admins By Group List */}
                 <div className="mt-fluent-md space-y-fluent-xl">

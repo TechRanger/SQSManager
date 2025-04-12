@@ -14,6 +14,7 @@ import { RconDto } from './dto/rcon.dto';
 import { FullAdminConfig, AdminGroup, AdminEntry } from './dto/admin-config.dto'; // Import Admin Config types
 import { AddGroupDto } from './dto/add-group.dto'; // Import AddGroupDto
 import { AddAdminDto } from './dto/add-admin.dto'; // Import AddAdminDto
+import { RealtimeGateway } from '../shared/realtime/realtime.gateway'; // Import the gateway
 
 // Define a type for the running server info
 interface RunningServerInfo {
@@ -29,10 +30,13 @@ export class ServerInstanceService implements OnModuleDestroy, OnModuleInit {
     private readonly logger = new Logger(ServerInstanceService.name);
     // Use the defined type for the map
     private runningServers: Map<number, RunningServerInfo> = new Map();
+    private readonly SQUAD_APP_ID = '393380'; // Squad Dedicated Server App ID
+    private activeUpdates: Set<number> = new Set(); // Track active updates
 
     constructor(
         @InjectRepository(ServerInstance)
         private serverInstanceRepository: Repository<ServerInstance>,
+        private readonly realtimeGateway: RealtimeGateway, // Inject the gateway
     ) {
         this.loadRunningServersFromSystem(); // Attempt to find existing processes on start?
     }
@@ -681,7 +685,9 @@ Port=21114`; // Add a default port too
         let currentLevel: string | null = null; // Renamed from currentMap
         let currentLayer: string | null = null; // Added for Layer
         let currentFactions: string | null = null; // Added for Factions
-        let nextMap: string | null = null;
+        let nextLevel: string | null = null;
+        let nextLayer: string | null = null;
+        let nextFactions: string | null = null;
         // 添加玩家列表数组
         let playersList: any[] = [];
         // 添加最近离开的玩家列表
@@ -762,7 +768,8 @@ Port=21114`; // Add a default port too
                     const squadIdMatch = playerLine.match(/Squad ID:\s*([^|]+)/);
                     if (squadIdMatch) {
                         const squadValue = squadIdMatch[1].trim();
-                        playerInfo.squad = squadValue === 'N/A' ? '无' : squadValue;
+                        // 直接使用解析到的值，如果它是 "N/A"，则保留 "N/A"
+                        playerInfo.squad = squadValue;
                     }
                     
                     // 解析是否为小队长
@@ -845,8 +852,13 @@ Port=21114`; // Add a default port too
                 currentFactions = factionsMatch ? factionsMatch[1].trim() : '解析失败';
 
                 // Parse next map
-                const nextMapMatch = nextMapResponse.match(/Next map is ([^,]+)/);
-                nextMap = nextMapMatch ? nextMapMatch[1].trim() : 'N/A';
+                const nextLevelMatch = nextMapResponse.match(/Next level is ([^,]+)/);
+                const nextLayerMatch = nextMapResponse.match(/layer is ([^,]+)/);
+                const nextFactionsMatch = nextMapResponse.match(/factions (.*)$/);
+
+                nextLevel = nextLevelMatch ? nextLevelMatch[1].trim() : 'N/A';
+                nextLayer = nextLayerMatch ? nextLayerMatch[1].trim() : 'N/A';
+                nextFactions = nextFactionsMatch ? nextFactionsMatch[1].trim() : 'N/A';
 
             } catch (err: any) {
                 this.logger.warn(`通过 RCON 获取服务器 ${id} 详细状态时出错: ${err.message}`);
@@ -867,7 +879,9 @@ Port=21114`; // Add a default port too
             currentLevel: currentLevel,   // Return current level
             currentLayer: currentLayer,   // Return current layer
             currentFactions: currentFactions, // Return current factions
-            nextMap: nextMap,
+            nextMap: nextLevel, // 使用 nextLevel 替代旧的 nextMap
+            nextLayer: nextLayer,
+            nextFactions: nextFactions,
             players: playersList,          // 返回玩家列表
             recentlyDisconnectedPlayers: disconnectedPlayersList
         };
@@ -1368,4 +1382,86 @@ Port=21114`; // Add a default port too
             throw err;
         }
     }
+
+    // --- New Update Method ---
+    async updateGameFiles(id: number, steamCmdPath: string): Promise<void> {
+        this.logger.log(`收到更新服务器 ${id} 游戏文件的请求 (SteamCMD Path: ${steamCmdPath})...`);
+        const instance = await this.findOne(id);
+
+        // Check if server is running (using DB state)
+        if (instance.isRunning) {
+            this.logger.warn(`服务器 ${id} 正在运行，无法进行更新。`);
+            throw new BadRequestException('服务器正在运行，请先停止后再更新。');
+        }
+
+        // Check if an update is already in progress for this server
+        if (this.activeUpdates.has(id)) {
+            this.logger.warn(`服务器 ${id} 的更新已经在进行中。`);
+            throw new ConflictException('此服务器的更新已经在进行中。');
+        }
+        this.activeUpdates.add(id);
+
+        const installPath = instance.installPath;
+        const updateRoom = `update-${id}`;
+
+        // Use the provided steamCmdPath
+        this.logger.log(`服务器 ${id}: 开始使用 steamcmd (${steamCmdPath}) 更新，安装目录: ${installPath}`);
+        this.realtimeGateway.sendUpdateLog(updateRoom, `服务器 ${id}: 开始使用 steamcmd (${steamCmdPath}) 更新，安装目录: ${installPath}`);
+
+        const steamCmdArgs = [
+            `+force_install_dir`, `"${installPath}"`,
+            `+login`, `anonymous`,
+            `+app_update`, this.SQUAD_APP_ID, `validate`,
+            `+quit`
+        ];
+
+        try {
+            // Use the provided steamCmdPath in spawn
+            const updateProcess = spawn(steamCmdPath, steamCmdArgs, {
+                shell: true, 
+                stdio: ['ignore', 'pipe', 'pipe'] 
+            });
+
+            updateProcess.stdout.on('data', (data) => {
+                const line = data.toString().trim();
+                if (line) {
+                    this.logger.debug(`[SteamCMD Update ${id} STDOUT]: ${line}`);
+                    this.realtimeGateway.sendUpdateLog(updateRoom, line);
+                }
+            });
+
+            updateProcess.stderr.on('data', (data) => {
+                const line = data.toString().trim();
+                if (line) {
+                    this.logger.warn(`[SteamCMD Update ${id} STDERR]: ${line}`);
+                    this.realtimeGateway.sendUpdateLog(updateRoom, `错误: ${line}`); // Prefix stderr lines
+                }
+            });
+
+            updateProcess.on('error', (err) => {
+                this.logger.error(`启动 steamcmd 进程失败 (服务器 ${id}): ${err.message}`);
+                this.realtimeGateway.sendUpdateError(updateRoom, `启动 steamcmd 进程失败: ${err.message}`);
+                this.activeUpdates.delete(id); // Remove from active updates on process error
+            });
+
+            updateProcess.on('close', (code) => {
+                this.activeUpdates.delete(id); // Remove from active updates when process finishes
+                if (code === 0) {
+                    this.logger.log(`服务器 ${id} steamcmd 更新成功完成 (退出码: ${code})。`);
+                    this.realtimeGateway.sendUpdateComplete(updateRoom, '游戏文件更新成功完成。');
+                } else {
+                    this.logger.error(`服务器 ${id} steamcmd 更新失败 (退出码: ${code})。`);
+                    this.realtimeGateway.sendUpdateError(updateRoom, `SteamCMD 更新进程意外退出，错误码: ${code}。请检查日志获取详细信息。`);
+                }
+            });
+
+        } catch (error) {
+            this.activeUpdates.delete(id); // Ensure removal on synchronous errors too
+            this.logger.error(`执行 steamcmd 更新时捕获到意外错误 (服务器 ${id}): ${error}`);
+            this.realtimeGateway.sendUpdateError(updateRoom, `执行更新时发生意外错误: ${error.message}`);
+            // Re-throw if needed, but usually handled by gateway message
+            // throw new InternalServerErrorException(`执行更新时发生意外错误。`);
+        }
+    }
+    // --- End New Update Method ---
 } 

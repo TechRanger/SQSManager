@@ -10,6 +10,7 @@ export type PermissionName =
   | 'server:edit_config'    // Edit server instance settings (ports, path, args, etc.)
   | 'server:delete'         // Delete server instance from manager
   | 'server:control'        // Start, Stop, Restart server
+  | 'server:update'         // Update game files via steamcmd
   | 'server:rcon'           // Send RCON commands via web UI
   | 'server:manage_bans_web'// Use Ban/Unban feature in web UI
   | 'server:manage_admins_web' // Add the new permission for Admins.cfg

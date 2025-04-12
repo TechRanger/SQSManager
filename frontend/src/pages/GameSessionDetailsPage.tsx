@@ -16,8 +16,9 @@ import LoadingSpinner from '../components/ui/LoadingSpinner';
 import FluentTable from '../components/ui/FluentTable';
 import FluentRow from '../components/ui/FluentRow';
 import BanList from '../components/BanList';
-import { LuRefreshCw, LuArrowLeft, LuSend, LuTrash, LuUserX, LuToggleLeft, LuToggleRight, LuSettings } from "react-icons/lu";
+import { LuRefreshCw, LuArrowLeft, LuSend, LuTrash, LuUserX, LuToggleLeft, LuToggleRight, LuSettings, LuX, LuTriangle, LuUsers, LuArrowRightLeft, LuRotateCw, LuFlag, LuMap, LuMapPin } from "react-icons/lu";
 import { BanEntry } from '../types/ban';
+import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Checkbox, TextField, Typography } from '@mui/material';
 
 // 玩家接口
 interface Player {
@@ -33,6 +34,9 @@ interface Player {
   onlineTime?: string;
   eosId?: string;
   disconnectTime?: string; // 玩家断开连接的时间
+  id?: number; // 玩家游戏内ID
+  squadId?: string; // 玩家小队ID
+  hasSquad?: boolean; // 玩家是否在小队中
 }
 
 // 服务器状态接口
@@ -43,8 +47,9 @@ interface ServerStatus {
   currentLevel: string | null;
   currentLayer: string | null;
   currentFactions: string | null;
-  nextLevel?: string | null;
+  nextMap?: string | null;
   nextLayer?: string | null;
+  nextFactions?: string | null;
   players: Player[];
   recentlyDisconnectedPlayers?: Player[];
   gameTime?: string | null;
@@ -154,6 +159,47 @@ function GameSessionDetailsPage() {
   const [pluginsError, setPluginsError] = useState<string | null>(null);
   const [togglingPlugin, setTogglingPlugin] = useState<string | null>(null);
   
+  // 踢出玩家模态框状态
+  const [kickModalOpen, setKickModalOpen] = useState(false);
+  const [playerToKick, setPlayerToKick] = useState<Player | null>(null);
+  const [kickReason, setKickReason] = useState('');
+  const [isKicking, setIsKicking] = useState(false);
+  
+  // 封禁玩家模态框状态
+  const [banModalOpen, setBanModalOpen] = useState(false);
+  const [playerToBan, setPlayerToBan] = useState<Player | null>(null);
+  const [banReason, setBanReason] = useState('');
+  const [banLength, setBanLength] = useState('0'); // 默认为永久封禁
+  const [isPermanentBan, setIsPermanentBan] = useState(true); // 是否永久封禁
+  const [banEndDate, setBanEndDate] = useState<string>(
+    new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] // 默认7天后
+  );
+  const [isBanning, setIsBanning] = useState(false);
+  const [customBanLength, setCustomBanLength] = useState<string>("");
+  
+  // 警告玩家
+  const [warnModalOpen, setWarnModalOpen] = useState(false);
+  const [playerToWarn, setPlayerToWarn] = useState<Player | null>(null);
+  const [warnReason, setWarnReason] = useState('');
+  const [isWarning, setIsWarning] = useState(false);
+  
+  // 踢出小队
+  const [isRemovingFromSquad, setIsRemovingFromSquad] = useState(false);
+  
+  // 跳边
+  const [isChangingTeam, setIsChangingTeam] = useState(false);
+  
+  // 广播功能
+  const [broadcastModalOpen, setBroadcastModalOpen] = useState(false);
+  const [broadcastMessage, setBroadcastMessage] = useState('');
+  const [isBroadcasting, setIsBroadcasting] = useState(false);
+  
+  // 地图操作
+  const [layerModalOpen, setLayerModalOpen] = useState(false);
+  const [layerName, setLayerName] = useState('');
+  const [layerOperation, setLayerOperation] = useState<'change' | 'next'>('change');
+  const [isLayerOperationLoading, setIsLayerOperationLoading] = useState(false);
+  
   // 获取服务器详情和状态
   useEffect(() => {
     if (!id) return;
@@ -199,6 +245,57 @@ function GameSessionDetailsPage() {
     
     try {
       const statusResponse = await getServerInstanceStatus(parseInt(id));
+      
+      // 处理玩家数据，提取ID信息和小队信息
+      if (statusResponse.data.players?.length > 0) {
+        statusResponse.data.players = statusResponse.data.players.map((player: Player) => {
+          // 尝试从RCON列出的玩家信息中解析出ID (ID: 0 这种格式)
+          const idMatch = player.name?.match(/ID: (\d+)/);
+          if (idMatch && idMatch[1]) {
+            player.id = parseInt(idMatch[1]);
+          }
+          
+          // 尝试从玩家名称中解析Squad ID - 使用更精确的正则表达式
+          let squadId = undefined;
+          
+          // 方法1: 尝试从名称中直接匹配 "Squad ID: X"
+          const squadIdMatch = player.name?.match(/Squad ID:\s*(\S+)/i);
+          if (squadIdMatch && squadIdMatch[1]) {
+            squadId = squadIdMatch[1];
+          } 
+          
+          // 方法2: 查找包含 "Squad ID" 的更广泛的模式
+          if (!squadId) {
+            const fullInfoMatch = player.name?.match(/Squad ID[:\s]+(\d+)/i);
+            if (fullInfoMatch && fullInfoMatch[1]) {
+              squadId = fullInfoMatch[1];
+            }
+          }
+          
+          // 方法3: 使用squad字段，如果字段存在，即使是N/A值也保留
+          if (!squadId && player.squad !== undefined) {
+            squadId = player.squad;
+          }
+          
+          // 设置最终的squadId
+          player.squadId = squadId;
+          
+          // 判断玩家是否在小队中 - 仍然将N/A视为不在小队中
+          player.hasSquad = !!(player.squadId && player.squadId !== 'N/A');
+          
+          // 记录详细的玩家信息，帮助调试
+          console.log(`玩家详细信息:
+名称: ${player.name}
+Squad ID提取结果: ${squadId}
+原始squad字段: ${player.squad}
+hasSquad值: ${player.hasSquad}
+玩家完整信息: ${JSON.stringify(player)}
+          `);
+          
+          return player;
+        });
+      }
+      
       setServerStatus(statusResponse.data);
     } catch (err: any) {
       console.error("获取服务器状态失败:", err);
@@ -292,14 +389,23 @@ function GameSessionDetailsPage() {
   
   // 踢出玩家
   const handleKickPlayer = async (player: Player) => {
-    if (!id || !server?.rconEnabled) return;
+    setPlayerToKick(player);
+    setKickReason('');
+    setKickModalOpen(true);
+  };
+  
+  // 执行踢出操作
+  const executeKickPlayer = async () => {
+    if (!id || !server?.rconEnabled || !playerToKick) return;
+    
+    setIsKicking(true);
     
     try {
-      // 直接使用RCON命令踢出玩家
-      const kickCmd = `AdminKick "${player.steamId}"`;
+      // 使用RCON命令踢出玩家
+      const kickCmd = `AdminKick "${playerToKick.steamId}" ${kickReason}`;
       const response = await sendRconCommand(parseInt(id), kickCmd);
       
-      // 添加到RCON响应中 - 直接使用原始响应
+      // 添加到RCON响应中
       setRconResponses(prev => [
         ...prev, 
         { 
@@ -310,47 +416,127 @@ function GameSessionDetailsPage() {
       
       // 刷新服务器状态
       refreshServerStatus();
+      
+      // 关闭模态框
+      setKickModalOpen(false);
     } catch (err: any) {
       console.error("踢出玩家失败:", err);
       setRconResponses(prev => [
         ...prev, 
         { 
-          command: `AdminKick "${player.steamId}"`, 
+          command: `AdminKick "${playerToKick.steamId}" ${kickReason}`, 
           response: `错误: ${err.response?.data?.message || '踢出玩家失败'}`
         }
       ]);
+    } finally {
+      setIsKicking(false);
     }
   };
   
-  // 封禁玩家
-  const handleBanPlayer = async (player: Player) => {
-    if (!id || !server?.rconEnabled) return;
+  // 打开封禁模态框
+  const openBanModal = (player: Player) => {
+    setPlayerToBan(player);
+    setBanReason("");
+    setBanLength("0");
+    setCustomBanLength("");
+    // 默认设置为非永久封禁，显示日期选择器
+    setIsPermanentBan(false);
+    // 设置默认结束日期为7天后
+    const defaultEndDate = new Date();
+    defaultEndDate.setDate(defaultEndDate.getDate() + 7);
+    setBanEndDate(defaultEndDate.toISOString().split('T')[0]);
     
+    setBanModalOpen(true);
+  };
+  
+  // 执行封禁玩家
+  const executeBanPlayer = async () => {
+    if (!playerToBan || !id) return;
+    
+    setIsBanning(true);
     try {
-      // 直接使用RCON命令封禁玩家
-      const banCmd = `AdminBan "${player.steamId}" 0 作弊或违反规则`;
-      const response = await sendRconCommand(parseInt(id), banCmd);
+      // 计算封禁时长
+      let finalBanLength = "0"; // 默认为永久封禁
       
-      // 添加到RCON响应中 - 直接使用原始响应
-      setRconResponses(prev => [
-        ...prev, 
-        { 
-          command: banCmd, 
-          response: response.data.response || ''
+      if (!isPermanentBan && banEndDate) {
+        // 使用用户选择的日期进行时长计算
+        const now = new Date();
+        const endDate = new Date(banEndDate);
+        
+        // 计算时间差（毫秒）
+        const timeDiff = endDate.getTime() - now.getTime();
+        
+        if (timeDiff <= 0) {
+          throw new Error("封禁结束日期必须在当前时间之后");
         }
-      ]);
+        
+        // 转换为小时
+        const hoursDiff = Math.ceil(timeDiff / (1000 * 60 * 60));
+        
+        // 根据时间差选择合适的单位
+        if (hoursDiff <= 24) {
+          // 小于24小时，用小时表示
+          finalBanLength = `${hoursDiff}h`;
+        } else if (hoursDiff <= 24 * 30) {
+          // 小于30天，用天表示
+          const daysDiff = Math.ceil(hoursDiff / 24);
+          finalBanLength = `${daysDiff}d`;
+        } else if (hoursDiff <= 24 * 30 * 12) {
+          // 小于1年，用月表示
+          const monthsDiff = Math.ceil(hoursDiff / (24 * 30));
+          finalBanLength = `${monthsDiff}mo`;
+        } else {
+          // 大于1年，用年表示
+          const yearsDiff = Math.ceil(hoursDiff / (24 * 365));
+          finalBanLength = `${yearsDiff}y`;
+        }
+      }
       
-      // 刷新服务器状态
-      refreshServerStatus();
-    } catch (err: any) {
-      console.error("封禁玩家失败:", err);
-      setRconResponses(prev => [
-        ...prev, 
-        { 
-          command: `AdminBan "${player.steamId}" 0 作弊或违反规则`, 
-          response: `错误: ${err.response?.data?.message || '封禁玩家失败'}`
-        }
-      ]);
+      // 确保有封禁原因，如果用户未提供则使用默认值
+      const finalBanReason = banReason.trim() || "违反服务器规则";
+      
+      // 构建并发送RCON命令 - 严格按照 AdminBan <SteamId> <BanLength> <BanReason> 格式
+      const command = `AdminBan "${playerToBan.steamId}" ${finalBanLength} "${finalBanReason}"`;
+      const response = await sendRconCommand(parseInt(id), command);
+      
+      // 修改成功判断条件，同时支持中英文成功消息
+      if (response.data && typeof response.data.response === 'string' && 
+          (response.data.response.includes("成功") || 
+           response.data.response.includes("Banned player") || 
+           response.data.response.includes("banned"))) {
+        
+        // 在RCON响应中添加更友好的提示
+        setRconResponses(prev => [
+          ...prev, 
+          { 
+            command: command, 
+            response: `玩家 ${playerToBan.name} 封禁成功。${isPermanentBan ? '永久封禁' : `封禁至 ${banEndDate}`}
+原始服务器响应: ${response.data.response}`
+          }
+        ]);
+        
+        // 刷新服务器状态以更新玩家列表
+        refreshServerStatus();
+        setBanModalOpen(false);
+      } else {
+        throw new Error(response.data?.response || "封禁玩家失败");
+      }
+    } catch (err) {
+      console.error("封禁玩家出错:", err);
+      setError(err instanceof Error ? err.message : "封禁玩家时发生未知错误");
+      
+      // 在错误情况下也添加到RCON响应中
+      if (playerToBan) {
+        setRconResponses(prev => [
+          ...prev, 
+          { 
+            command: `AdminBan "${playerToBan.steamId}" ...`, 
+            response: `错误: 封禁 ${playerToBan.name} 失败 - ${err instanceof Error ? err.message : "未知错误"}`
+          }
+        ]);
+      }
+    } finally {
+      setIsBanning(false);
     }
   };
   
@@ -460,6 +646,275 @@ function GameSessionDetailsPage() {
     }
   }, [activeTab, id]);
   
+  // 警告玩家
+  const handleWarnPlayer = (player: Player) => {
+    setPlayerToWarn(player);
+    setWarnReason('');
+    setWarnModalOpen(true);
+  };
+  
+  // 执行警告操作
+  const executeWarnPlayer = async () => {
+    if (!id || !server?.rconEnabled || !playerToWarn) return;
+    
+    setIsWarning(true);
+    
+    try {
+      // 使用RCON命令警告玩家
+      const warnCmd = `AdminWarn "${playerToWarn.steamId}" ${warnReason}`;
+      const response = await sendRconCommand(parseInt(id), warnCmd);
+      
+      // 添加到RCON响应中
+      setRconResponses(prev => [
+        ...prev, 
+        { 
+          command: warnCmd, 
+          response: response.data.response || '已发送警告'
+        }
+      ]);
+      
+      // 关闭模态框
+      setWarnModalOpen(false);
+    } catch (err: any) {
+      console.error("警告玩家失败:", err);
+      setRconResponses(prev => [
+        ...prev, 
+        { 
+          command: `AdminWarn "${playerToWarn.steamId}" ${warnReason}`, 
+          response: `错误: ${err.response?.data?.message || '警告玩家失败'}`
+        }
+      ]);
+    } finally {
+      setIsWarning(false);
+    }
+  };
+  
+  // 踢出小队
+  const handleRemoveFromSquad = async (player: Player) => {
+    if (!id || !server?.rconEnabled || (player.id === undefined && !player.steamId)) return;
+    
+    setIsRemovingFromSquad(true);
+    
+    try {
+      // 使用RCON命令踢出小队 - 使用玩家游戏内ID而不是SteamID
+      const playerId = player.id !== undefined ? player.id : player.steamId;
+      const cmd = `AdminRemovePlayerFromSquadById ${playerId}`;
+      const response = await sendRconCommand(parseInt(id), cmd);
+      
+      // 添加到RCON响应中
+      setRconResponses(prev => [
+        ...prev, 
+        { 
+          command: cmd, 
+          response: response.data.response || '已将玩家踢出小队'
+        }
+      ]);
+      
+      // 刷新服务器状态
+      refreshServerStatus();
+    } catch (err: any) {
+      console.error("踢出小队失败:", err);
+      setRconResponses(prev => [
+        ...prev, 
+        { 
+          command: `AdminRemovePlayerFromSquadById ${player.id !== undefined ? player.id : player.steamId}`, 
+          response: `错误: ${err.response?.data?.message || '踢出小队失败'}`
+        }
+      ]);
+    } finally {
+      setIsRemovingFromSquad(false);
+    }
+  };
+  
+  // 跳边
+  const handleForceTeamChange = async (player: Player) => {
+    if (!id || !server?.rconEnabled || !player.steamId) return;
+    
+    setIsChangingTeam(true);
+    
+    try {
+      // 使用RCON命令强制换边
+      const cmd = `AdminForceTeamChange "${player.steamId}"`;
+      const response = await sendRconCommand(parseInt(id), cmd);
+      
+      // 添加到RCON响应中
+      setRconResponses(prev => [
+        ...prev, 
+        { 
+          command: cmd, 
+          response: response.data.response || '已强制玩家换边'
+        }
+      ]);
+      
+      // 刷新服务器状态
+      refreshServerStatus();
+    } catch (err: any) {
+      console.error("强制换边失败:", err);
+      setRconResponses(prev => [
+        ...prev, 
+        { 
+          command: `AdminForceTeamChange "${player.steamId}"`, 
+          response: `错误: ${err.response?.data?.message || '强制换边失败'}`
+        }
+      ]);
+    } finally {
+      setIsChangingTeam(false);
+    }
+  };
+  
+  // 重开匹配
+  const handleRestartMatch = async () => {
+    if (!id || !server?.rconEnabled) return;
+    
+    if (!window.confirm('确定要重新开始当前匹配吗？')) return;
+    
+    try {
+      const cmd = 'AdminRestartMatch';
+      const response = await sendRconCommand(parseInt(id), cmd);
+      
+      // 添加到RCON响应中
+      setRconResponses(prev => [
+        ...prev, 
+        { 
+          command: cmd, 
+          response: response.data.response || '已重新开始匹配'
+        }
+      ]);
+      
+      // 刷新服务器状态
+      refreshServerStatus();
+    } catch (err: any) {
+      console.error("重开匹配失败:", err);
+      setRconResponses(prev => [
+        ...prev, 
+        { 
+          command: 'AdminRestartMatch', 
+          response: `错误: ${err.response?.data?.message || '重开匹配失败'}`
+        }
+      ]);
+    }
+  };
+  
+  // 结束匹配
+  const handleEndMatch = async () => {
+    if (!id || !server?.rconEnabled) return;
+    
+    if (!window.confirm('确定要结束当前匹配吗？')) return;
+    
+    try {
+      const cmd = 'AdminEndMatch';
+      const response = await sendRconCommand(parseInt(id), cmd);
+      
+      // 添加到RCON响应中
+      setRconResponses(prev => [
+        ...prev, 
+        { 
+          command: cmd, 
+          response: response.data.response || '已结束匹配'
+        }
+      ]);
+      
+      // 刷新服务器状态
+      refreshServerStatus();
+    } catch (err: any) {
+      console.error("结束匹配失败:", err);
+      setRconResponses(prev => [
+        ...prev, 
+        { 
+          command: 'AdminEndMatch', 
+          response: `错误: ${err.response?.data?.message || '结束匹配失败'}`
+        }
+      ]);
+    }
+  };
+  
+  // 打开图层操作模态框
+  const openLayerModal = (operation: 'change' | 'next') => {
+    setLayerOperation(operation);
+    setLayerName('');
+    setLayerModalOpen(true);
+  };
+  
+  // 执行图层操作
+  const executeLayerOperation = async () => {
+    if (!id || !server?.rconEnabled || !layerName.trim()) return;
+    
+    setIsLayerOperationLoading(true);
+    
+    try {
+      // 根据操作类型构建命令
+      const cmd = layerOperation === 'change' 
+        ? `AdminChangeLayer ${layerName}` 
+        : `AdminSetNextLayer ${layerName}`;
+      
+      const response = await sendRconCommand(parseInt(id), cmd);
+      
+      // 添加到RCON响应中
+      setRconResponses(prev => [
+        ...prev, 
+        { 
+          command: cmd, 
+          response: response.data.response || (layerOperation === 'change' ? '已更换图层' : '已设置下一图层')
+        }
+      ]);
+      
+      // 刷新服务器状态
+      refreshServerStatus();
+      
+      // 关闭模态框
+      setLayerModalOpen(false);
+    } catch (err: any) {
+      console.error("图层操作失败:", err);
+      setRconResponses(prev => [
+        ...prev, 
+        { 
+          command: layerOperation === 'change' ? `AdminChangeLayer ${layerName}` : `AdminSetNextLayer ${layerName}`, 
+          response: `错误: ${err.response?.data?.message || '图层操作失败'}`
+        }
+      ]);
+    } finally {
+      setIsLayerOperationLoading(false);
+    }
+  };
+  
+  // 执行广播消息
+  const executeBroadcast = async () => {
+    if (!id || !server?.rconEnabled || !broadcastMessage.trim()) return;
+    
+    setIsBroadcasting(true);
+    
+    try {
+      // 使用RCON命令发送广播
+      const command = `AdminBroadcast "${broadcastMessage.trim()}"`;
+      const response = await sendRconCommand(parseInt(id), command);
+      
+      // 添加到RCON响应中
+      setRconResponses(prev => [
+        ...prev, 
+        { 
+          command: command, 
+          response: response.data.response || '广播已发送'
+        }
+      ]);
+      
+      // 关闭模态框
+      setBroadcastModalOpen(false);
+      // 清空广播内容
+      setBroadcastMessage('');
+    } catch (err: any) {
+      console.error("发送广播失败:", err);
+      setRconResponses(prev => [
+        ...prev, 
+        { 
+          command: `AdminBroadcast "${broadcastMessage.trim()}"`, 
+          response: `错误: ${err.response?.data?.message || '发送广播失败'}`
+        }
+      ]);
+    } finally {
+      setIsBroadcasting(false);
+    }
+  };
+  
   // 如果用户没有对局管理权限，显示错误信息
   if (!hasPermission('game_session:view')) {
     return (
@@ -566,55 +1021,114 @@ function GameSessionDetailsPage() {
                   <div className="text-sm text-gray-500">服务器名称</div>
                   <div className="font-medium">{server.name}</div>
                 </div>
-                <div>
-                  <div className="text-sm text-gray-500">游戏</div>
-                  <div className="font-medium">{server.game}</div>
-                </div>
-                <div>
-                  <div className="text-sm text-gray-500">描述</div>
-                  <div className="font-medium">{server.description || '无'}</div>
-                </div>
               </div>
             </div>
             
             <div>
               <h3 className="text-lg font-semibold mb-4">游戏状态</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <div>
-                  <div className="text-sm text-gray-500">当前地图</div>
-                  <div className="font-medium">{serverStatus?.currentLevel || 'N/A'}</div>
-                </div>
-                <div>
-                  <div className="text-sm text-gray-500">当前层级</div>
-                  <div className="font-medium">{serverStatus?.currentLayer || 'N/A'}</div>
-                </div>
-                <div>
-                  <div className="text-sm text-gray-500">阵营</div>
-                  <div className="font-medium">{serverStatus?.currentFactions || 'N/A'}</div>
-                </div>
-                <div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Row 1: Player Count */}
+                <div className="md:col-span-1">
                   <div className="text-sm text-gray-500">玩家数量</div>
-                  <div className="font-medium">{serverStatus?.playerCount || 0}</div>
+                  <div className="font-medium">{serverStatus?.playerCount ?? 0}</div>
                 </div>
-                {serverStatus?.gameTime && (
+                <div className="md:col-span-2"></div> {/* Empty divs to fill the row if needed */}
+
+                {/* Row 2: Current Map, Layer, Factions */}
+                <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
+                    <div className="text-sm text-gray-500">当前地图</div>
+                    <div className="font-medium">{serverStatus?.currentLevel || 'N/A'}</div>
+                  </div>
+                  <div>
+                    <div className="text-sm text-gray-500">当前层级</div>
+                    <div className="font-medium">{serverStatus?.currentLayer || 'N/A'}</div>
+                  </div>
+                  <div>
+                    <div className="text-sm text-gray-500">当前地图阵营</div>
+                    <div className="font-medium">{serverStatus?.currentFactions || 'N/A'}</div>
+                  </div>
+                </div>
+
+                {/* Row 3: Next Map, Layer, Factions */}
+                <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <div className="text-sm text-gray-500">下一地图</div>
+                    <div className="font-medium">{serverStatus?.nextMap || 'N/A'}</div>
+                  </div>
+                  <div>
+                    <div className="text-sm text-gray-500">下一层级</div>
+                    <div className="font-medium">{serverStatus?.nextLayer || 'N/A'}</div>
+                  </div>
+                  <div>
+                    <div className="text-sm text-gray-500">下张地图阵营</div>
+                    <div className="font-medium">{serverStatus?.nextFactions || 'N/A'}</div>
+                  </div>
+                </div>
+                
+                {/* Optional: Game Time and Tick Rate (if needed, adjust their placement) */}
+                {serverStatus?.gameTime && (
+                  <div className="md:col-span-1">
                     <div className="text-sm text-gray-500">游戏时间</div>
                     <div className="font-medium">{serverStatus.gameTime}</div>
                   </div>
                 )}
                 {serverStatus?.tickRate && (
-                  <div>
+                  <div className="md:col-span-1">
                     <div className="text-sm text-gray-500">Tick Rate</div>
                     <div className="font-medium">{serverStatus.tickRate}</div>
                   </div>
                 )}
-                {serverStatus?.nextLevel && (
-                  <div>
-                    <div className="text-sm text-gray-500">下一张地图</div>
-                    <div className="font-medium">{serverStatus.nextLevel}</div>
-                  </div>
-                )}
+
               </div>
+              
+              {hasPermission('server:rcon') && server.rconEnabled && (
+                <div className="mt-6">
+                  <h3 className="text-lg font-semibold mb-4">游戏控制</h3>
+                  <div className="flex flex-wrap gap-2">
+                    <FluentButton
+                      variant="secondary"
+                      size="small"
+                      icon={<LuRotateCw />}
+                      onClick={handleRestartMatch}
+                    >
+                      重开
+                    </FluentButton>
+                    <FluentButton
+                      variant="secondary"
+                      size="small"
+                      icon={<LuArrowRightLeft />}
+                      onClick={handleEndMatch}
+                    >
+                      下一局
+                    </FluentButton>
+                    <FluentButton
+                      variant="secondary"
+                      size="small"
+                      icon={<LuMap />}
+                      onClick={() => openLayerModal('change')}
+                    >
+                      换图
+                    </FluentButton>
+                    <FluentButton
+                      variant="secondary"
+                      size="small"
+                      icon={<LuMapPin />}
+                      onClick={() => openLayerModal('next')}
+                    >
+                      设置下局地图
+                    </FluentButton>
+                    <FluentButton
+                      variant="secondary"
+                      size="small"
+                      icon={<LuSend />}
+                      onClick={() => setBroadcastModalOpen(true)}
+                    >
+                      广播
+                    </FluentButton>
+                  </div>
+                </div>
+              )}
             </div>
             
             <div>
@@ -663,13 +1177,9 @@ function GameSessionDetailsPage() {
                       <td className="whitespace-nowrap text-gray-700 font-medium">{player.name}</td>
                       <td className="whitespace-nowrap text-gray-500">{player.steamId}</td>
                       <td className="whitespace-nowrap text-gray-500">{player.eosId || 'N/A'}</td>
-                      {server.game === 'Squad' && (
-                        <>
-                          <td className="whitespace-nowrap text-gray-500">{player.team || 'N/A'}</td>
-                          <td className="whitespace-nowrap text-gray-500">{player.squad || 'N/A'}</td>
-                          <td className="whitespace-nowrap text-gray-500">{player.role || 'N/A'}</td>
-                        </>
-                      )}
+                      {server.game === 'Squad' && <td className="whitespace-nowrap text-gray-500">{player.team || 'N/A'}</td>}
+                      {server.game === 'Squad' && <td className="whitespace-nowrap text-gray-500">{player.squad || 'N/A'}</td>}
+                      {server.game === 'Squad' && <td className="whitespace-nowrap text-gray-500">{player.role || 'N/A'}</td>}
                       <td className="whitespace-nowrap text-right">
                         <div className="flex justify-end space-x-2">
                           {hasPermission('server:rcon') && server.rconEnabled && (
@@ -677,15 +1187,44 @@ function GameSessionDetailsPage() {
                               <FluentButton
                                 variant="secondary"
                                 size="small"
+                                icon={<LuTriangle />}
+                                onClick={() => handleWarnPlayer(player)}
+                              >
+                                警告
+                              </FluentButton>
+                              {player.hasSquad && (
+                                <FluentButton
+                                  variant="secondary"
+                                  size="small"
+                                  icon={<LuUsers />}
+                                  onClick={() => handleRemoveFromSquad(player)}
+                                  disabled={isRemovingFromSquad}
+                                >
+                                  踢出小队
+                                </FluentButton>
+                              )}
+                              <FluentButton
+                                variant="secondary"
+                                size="small"
+                                icon={<LuArrowRightLeft />}
+                                onClick={() => handleForceTeamChange(player)}
+                                disabled={isChangingTeam}
+                              >
+                                跳边
+                              </FluentButton>
+                              <FluentButton
+                                variant="secondary"
+                                size="small"
                                 icon={<LuUserX />}
                                 onClick={() => handleKickPlayer(player)}
+                                className="!bg-orange-500 !text-white font-medium"
                               >
                                 踢出
                               </FluentButton>
                               <FluentButton
                                 variant="danger"
                                 size="small"
-                                onClick={() => handleBanPlayer(player)}
+                                onClick={() => openBanModal(player)}
                               >
                                 封禁
                               </FluentButton>
@@ -924,6 +1463,321 @@ function GameSessionDetailsPage() {
           )}
         </FluentTab>
       </Card>
+      
+      {/* 踢出玩家模态框 */}
+      {kickModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
+            <div className="p-5 border-b border-gray-200 flex justify-between items-center">
+              <h3 className="text-lg font-semibold text-gray-900">踢出玩家</h3>
+              <button 
+                onClick={() => setKickModalOpen(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <LuX size={20} />
+              </button>
+            </div>
+            
+            <div className="p-5">
+              <div className="mb-5">
+                <p className="text-gray-600 mb-2">
+                  您即将踢出以下玩家:
+                </p>
+                <div className="bg-gray-50 p-3 rounded-md">
+                  <p className="font-medium">{playerToKick?.name}</p>
+                  <p className="text-sm text-gray-500">Steam ID: {playerToKick?.steamId}</p>
+                </div>
+              </div>
+              
+              <div className="mb-5">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  踢出原因 (可选)
+                </label>
+                <FluentInput
+                  type="text"
+                  placeholder="请输入踢出原因..."
+                  value={kickReason}
+                  onChange={(e) => setKickReason(e.target.value)}
+                  className="w-full"
+                />
+              </div>
+              
+              <div className="flex justify-end space-x-3">
+                <FluentButton
+                  variant="secondary"
+                  onClick={() => setKickModalOpen(false)}
+                  disabled={isKicking}
+                >
+                  取消
+                </FluentButton>
+                <FluentButton
+                  variant="danger"
+                  onClick={executeKickPlayer}
+                  disabled={isKicking}
+                >
+                  {isKicking ? '处理中...' : '确认踢出'}
+                </FluentButton>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* 封禁玩家模态框 */}
+      {banModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
+            <div className="p-5 border-b border-gray-200 flex justify-between items-center">
+              <h3 className="text-lg font-semibold text-gray-900">封禁玩家</h3>
+              <button 
+                onClick={() => setBanModalOpen(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <LuX size={20} />
+              </button>
+            </div>
+            
+            <div className="p-5">
+              <div className="mb-5">
+                <p className="text-gray-600 mb-2">
+                  您即将封禁以下玩家:
+                </p>
+                <div className="bg-gray-50 p-3 rounded-md">
+                  <p className="font-medium">{playerToBan?.name}</p>
+                  <p className="text-sm text-gray-500">Steam ID: {playerToBan?.steamId}</p>
+                </div>
+              </div>
+              
+              <div className="mb-5">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  封禁原因 (可选)
+                </label>
+                <FluentInput
+                  type="text"
+                  placeholder="请输入封禁原因..."
+                  value={banReason}
+                  onChange={(e) => setBanReason(e.target.value)}
+                  className="w-full"
+                />
+              </div>
+              
+              <div className="mb-5">
+                <label className="flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={isPermanentBan}
+                    onChange={(e) => setIsPermanentBan(e.target.checked)}
+                    className="mr-2 h-4 w-4"
+                  />
+                  <span className="text-sm font-medium text-gray-700">永久封禁</span>
+                </label>
+                
+                {!isPermanentBan && (
+                  <div className="mt-3">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      封禁结束日期
+                    </label>
+                    <input
+                      type="date"
+                      value={banEndDate}
+                      onChange={(e) => setBanEndDate(e.target.value)}
+                      min={new Date().toISOString().split('T')[0]}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">
+                      系统将自动计算从现在到选择日期的封禁时长
+                    </p>
+                  </div>
+                )}
+              </div>
+              
+              <div className="flex justify-end space-x-3">
+                <FluentButton
+                  variant="secondary"
+                  onClick={() => setBanModalOpen(false)}
+                  disabled={isBanning}
+                >
+                  取消
+                </FluentButton>
+                <FluentButton
+                  variant="danger"
+                  onClick={executeBanPlayer}
+                  disabled={isBanning}
+                >
+                  {isBanning ? '处理中...' : '确认封禁'}
+                </FluentButton>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* 警告玩家模态框 */}
+      {warnModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
+            <div className="p-5 border-b border-gray-200 flex justify-between items-center">
+              <h3 className="text-lg font-semibold text-gray-900">警告玩家</h3>
+              <button 
+                onClick={() => setWarnModalOpen(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <LuX size={20} />
+              </button>
+            </div>
+            
+            <div className="p-5">
+              <div className="mb-5">
+                <p className="text-gray-600 mb-2">
+                  您即将向以下玩家发送警告:
+                </p>
+                <div className="bg-gray-50 p-3 rounded-md">
+                  <p className="font-medium">{playerToWarn?.name}</p>
+                  <p className="text-sm text-gray-500">Steam ID: {playerToWarn?.steamId}</p>
+                </div>
+              </div>
+              
+              <div className="mb-5">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  警告原因 (可选)
+                </label>
+                <FluentInput
+                  type="text"
+                  placeholder="请输入警告原因..."
+                  value={warnReason}
+                  onChange={(e) => setWarnReason(e.target.value)}
+                  className="w-full"
+                />
+              </div>
+              
+              <div className="flex justify-end space-x-3">
+                <FluentButton
+                  variant="secondary"
+                  onClick={() => setWarnModalOpen(false)}
+                  disabled={isWarning}
+                >
+                  取消
+                </FluentButton>
+                <FluentButton
+                  variant="warning"
+                  onClick={executeWarnPlayer}
+                  disabled={isWarning}
+                  className="!bg-yellow-500 !text-white"
+                >
+                  {isWarning ? '处理中...' : '发送警告'}
+                </FluentButton>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* 广播消息模态框 */}
+      {broadcastModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
+            <div className="p-5 border-b border-gray-200 flex justify-between items-center">
+              <h3 className="text-lg font-semibold text-gray-900">发送广播</h3>
+              <button 
+                onClick={() => setBroadcastModalOpen(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <LuX size={20} />
+              </button>
+            </div>
+            
+            <div className="p-5">
+              <div className="mb-5">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  广播内容
+                </label>
+                <FluentInput
+                  type="text"
+                  placeholder="请输入广播内容..."
+                  value={broadcastMessage}
+                  onChange={(e) => setBroadcastMessage(e.target.value)}
+                  className="w-full"
+                />
+                <p className="mt-2 text-sm text-gray-500">
+                  消息将向服务器中的所有玩家显示
+                </p>
+              </div>
+              
+              <div className="flex justify-end space-x-3">
+                <FluentButton
+                  variant="secondary"
+                  onClick={() => setBroadcastModalOpen(false)}
+                  disabled={isBroadcasting}
+                >
+                  取消
+                </FluentButton>
+                <FluentButton
+                  variant="primary"
+                  onClick={executeBroadcast}
+                  disabled={isBroadcasting || !broadcastMessage.trim()}
+                >
+                  {isBroadcasting ? '发送中...' : '发送广播'}
+                </FluentButton>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* 图层操作模态框 */}
+      {layerModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
+            <div className="p-5 border-b border-gray-200 flex justify-between items-center">
+              <h3 className="text-lg font-semibold text-gray-900">
+                {layerOperation === 'change' ? '更换当前图层' : '设置下一图层'}
+              </h3>
+              <button 
+                onClick={() => setLayerModalOpen(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <LuX size={20} />
+              </button>
+            </div>
+            
+            <div className="p-5">
+              <div className="mb-5">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  图层名称
+                </label>
+                <FluentInput
+                  type="text"
+                  placeholder="输入完整的图层名称..."
+                  value={layerName}
+                  onChange={(e) => setLayerName(e.target.value)}
+                  className="w-full"
+                />
+                <p className="mt-2 text-sm text-gray-500">
+                  请输入完整的图层名称，例如：Yehorivka_AAS_v1
+                </p>
+              </div>
+              
+              <div className="flex justify-end space-x-3">
+                <FluentButton
+                  variant="secondary"
+                  onClick={() => setLayerModalOpen(false)}
+                  disabled={isLayerOperationLoading}
+                >
+                  取消
+                </FluentButton>
+                <FluentButton
+                  variant="primary"
+                  onClick={executeLayerOperation}
+                  disabled={isLayerOperationLoading || !layerName.trim()}
+                  className="!bg-blue-600 !text-white"
+                >
+                  {isLayerOperationLoading ? '处理中...' : (layerOperation === 'change' ? '更换图层' : '设置下一图层')}
+                </FluentButton>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

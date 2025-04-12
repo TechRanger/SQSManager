@@ -356,7 +356,8 @@ function DashboardPage() {
                                     disabled={isLoading || !server.isRunning}
                                     icon={<LuPower />}
                                     className={`
-                                        ${isLoading || !server.isRunning ? '!bg-gray-200 !text-gray-600' : ''} 
+                                        ${isLoading || !server.isRunning ? '!bg-gray-200 !text-gray-600' : '!bg-blue-500 !text-white hover:!bg-blue-600'} 
+                                        ${currentLoadingState === 'restarting' ? '!bg-blue-400 !opacity-80' : ''}
                                     `}
                                 >
                                     {currentLoadingState === 'restarting' ? '重启中...' : '重启'}

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { DeployInstanceDto } from '../types/deploy-instance.dto';
 // Import shared UI components
 import FluentInput from '../components/ui/FluentInput';
@@ -97,6 +97,7 @@ function DeployServerPage() {
         const errors: string[] = [];
         if (!formData.name?.trim()) errors.push('实例名称不能为空。');
         if (!formData.installPath?.trim()) errors.push('安装路径不能为空。');
+        if (!formData.steamCmdPath?.trim()) errors.push('SteamCMD路径不能为空。');
         if (!formData.rconPassword) errors.push('RCON 密码不能为空。');
         if (!formData.gamePort || formData.gamePort <= 0) errors.push('游戏端口必须是有效的正整数。');
         if (!formData.queryPort || formData.queryPort <= 0) errors.push('查询端口必须是有效的正整数。');
@@ -133,7 +134,7 @@ function DeployServerPage() {
                  beaconPort: Number(formData.beaconPort),
                  rconPassword: formData.rconPassword!,
                  extraArgs: formData.extraArgs?.trim() || '',
-                 steamCmdPath: formData.steamCmdPath?.trim() || undefined,
+                 steamCmdPath: formData.steamCmdPath!.trim(),
              };
 
             // 使用更安全的方式获取SSE URL
@@ -181,7 +182,9 @@ function DeployServerPage() {
                     setStatus('success');
                     setOutputLog(prev => [...prev, '\n*** 部署成功完成！ ***']);
                     evtSource.close();
-                    setTimeout(() => navigate('/'), 3000);
+                    // 显示提示并延长跳转时间
+                    alert('部署成功！即将返回仪表板...');
+                    setTimeout(() => navigate('/'), 5000);
                 } else {
                     setOutputLog(prev => [...prev, data]);
                 }
@@ -256,6 +259,7 @@ function DeployServerPage() {
                             id="steamCmdPath" 
                             value={formData.steamCmdPath || ''} 
                             onChange={handleChange} 
+                            required
                             disabled={isLoading}
                             placeholder="例如: C:\steamcmd\steamcmd.exe 或 /usr/bin/steamcmd"
                         />
@@ -321,13 +325,12 @@ function DeployServerPage() {
                             disabled={isLoading}
                             placeholder="设置 RCON 管理员密码"
                         />
-                        <FluentTextarea 
+                        <FluentInput 
                             label="额外启动参数 (可选):"
                             name="extraArgs" 
                             id="extraArgs" 
                             value={formData.extraArgs || ''} 
                             onChange={handleChange} 
-                            rows={3} 
                             disabled={isLoading}
                             placeholder="例如: -DisableVAC -Mods=..."
                         />
@@ -346,46 +349,35 @@ function DeployServerPage() {
                     </form>
                 </Card>
             ) : (
-                <Card title="部署日志">
-                    {/* Error Message Display */}
-                    {errorMessage && (
-                        <div className="bg-danger-background text-danger p-fluent-md rounded-fluent-sm border border-red-300 mb-fluent-lg text-sm">
-                             错误: {errorMessage}
-                        </div>
-                    )}
-                    
-                    {/* 部署状态指示 */}
-                    <div className="mb-fluent-md text-sm">
-                        {status === 'deploying' && <span className="text-blue-600 font-medium">正在部署中，请耐心等待...</span>}
-                        {status === 'success' && <span className="text-green-600 font-medium">部署成功完成！</span>}
-                        {status === 'error' && <span className="text-red-600 font-medium">部署失败。</span>}
-                        
-                        {/* 添加返回按钮 */}
-                        {(status === 'success' || status === 'error') && (
-                            <FluentButton 
-                                onClick={() => setStatus('idle')}
-                                variant="secondary"
-                                size="small"
-                                className="ml-4"
-                            >
-                                返回配置
-                            </FluentButton>
+                <Card title="服务器部署日志">
+                    <div className="mb-4">
+                        {status === 'success' && (
+                            <AlertMessage 
+                                type="success" 
+                                title="部署成功" 
+                                message="服务器部署成功完成。正在跳转到仪表板..." 
+                            />
+                        )}
+                        {status === 'error' && (
+                            <AlertMessage 
+                                type="error" 
+                                title="部署失败" 
+                                message={errorMessage || '部署过程中发生未知错误。'} 
+                            />
                         )}
                     </div>
-                    
-                    {/* Log Output */}
-                    <pre 
-                        ref={logContainerRef} 
-                        className="bg-neutral-background-dark text-neutral-foreground-static font-mono text-xs p-fluent-md rounded-fluent-sm border border-neutral-stroke overflow-auto h-96 whitespace-pre-wrap"
+                    <pre
+                        ref={logContainerRef}
+                        className="bg-gray-900 text-white font-mono text-xs p-4 rounded-md overflow-auto h-96 whitespace-pre-wrap border border-gray-700"
                     >
-                        {outputLog.join('\n') || (isLoading ? '等待输出...' : '无输出')}
+                        {outputLog.join('\n')}
                     </pre>
-                    
-                    {/* Success Message */} 
-                    {status === 'success' && (
-                         <div className="mt-fluent-md bg-success-background text-success p-fluent-md rounded-fluent-sm border border-green-300 text-sm font-medium">
-                            部署成功完成！即将跳转回仪表盘...
-                         </div>
+                    {(status === 'success' || status === 'error') && (
+                        <div className="mt-4 flex justify-center">
+                            <Link to="/">
+                                <FluentButton variant="primary">返回仪表板</FluentButton>
+                            </Link>
+                        </div>
                     )}
                 </Card>
             )}

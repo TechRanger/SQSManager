@@ -484,14 +484,16 @@ function UserManagementPage() {
                                 </td>
                                 <td className="whitespace-nowrap text-right">
                                     <div className="flex justify-end space-x-2">
-                                        <FluentButton
-                                            variant="secondary"
-                                            size="small"
-                                            onClick={() => openEditPermissionsModal(role)}
-                                            icon={<LuPencil />}
-                                        >
-                                            权限
-                                        </FluentButton>
+                                        {role.name !== 'Owner' && (
+                                            <FluentButton
+                                                variant="secondary"
+                                                size="small"
+                                                onClick={() => openEditPermissionsModal(role)}
+                                                icon={<LuPencil />}
+                                            >
+                                                权限
+                                            </FluentButton>
+                                        )}
                                         {role.name !== 'Owner' && (
                                             <FluentButton
                                                 variant="danger"
@@ -547,7 +549,7 @@ function UserManagementPage() {
                             )}
                         </form>
                          {/* Modal Footer */} 
-                        <div className="p-fluent-md bg-neutral-background border-t border-neutral-stroke flex justify-end space-x-fluent-sm mt-auto">
+                        <div className="p-fluent-md bg-neutral-background flex justify-end space-x-fluent-sm mt-auto">
                              <FluentButton type="button" variant="secondary" onClick={closeEditPermissionsModal} disabled={assigningPermissionsLoading}>
                                 取消
                             </FluentButton>

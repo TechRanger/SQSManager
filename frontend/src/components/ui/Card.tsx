@@ -2,7 +2,7 @@ import React from 'react';
 
 // Card Component
 interface CardProps {
-  title?: string;
+  title?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
   actions?: React.ReactNode; // Optional slot for actions in the footer
@@ -15,7 +15,7 @@ const Card: React.FC<CardProps> = ({ title, children, className, actions, icon }
       {title && (
         <div className="px-6 py-4 bg-gray-50 flex items-center">
           {icon && <span className="mr-2">{icon}</span>}
-          <h3 className="text-lg font-semibold text-gray-800">{title}</h3>
+          <h3 className="text-lg font-semibold text-gray-800">{typeof title === 'string' ? title : title}</h3>
         </div>
       )}
       <div className="p-6 flex-grow">
