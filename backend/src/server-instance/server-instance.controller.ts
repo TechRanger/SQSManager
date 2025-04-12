@@ -34,7 +34,7 @@ export class ServerInstanceController {
   }
 
   @Get(':id')
-  @RequirePermissions('server:view_details')
+  @RequirePermissions('server:view_all')
   findOne(@Param('id') id: string): Promise<ServerInstance> {
     return this.serverInstanceService.findOne(+id);
   }
@@ -46,7 +46,7 @@ export class ServerInstanceController {
   }
 
   @Get(':id/status')
-  @RequirePermissions('server:view_details')
+  @RequirePermissions('server:view_all')
   getStatus(@Param('id') id: string): Promise<any> {
     return this.serverInstanceService.getStatus(+id);
   }
@@ -106,7 +106,7 @@ export class ServerInstanceController {
   }
 
   @Get(':id/bans')
-  @RequirePermissions('server:view_details')
+  @RequirePermissions('server:view_all')
   async getBanList(@Param('id') id: string): Promise<BanEntry[]> {
     return this.serverInstanceService.getBanList(+id);
   }
@@ -130,7 +130,7 @@ export class ServerInstanceController {
   }
 
   @Get(':id/admin-config')
-  @RequirePermissions('server:view_details')
+  @RequirePermissions('server:view_all')
   async getAdminConfig(@Param('id') id: string): Promise<FullAdminConfig> {
       return this.serverInstanceService.getAdminConfig(+id);
   }

@@ -55,8 +55,8 @@ const SidebarNav: React.FC<SidebarNavProps> = ({ user, onLogout }) => {
           let canView = true; // Default to true
 
           if (item.path === '/dashboard') {
-            // Custom check for Dashboard: requires view_details AND view_all
-            canView = hasPermission('server:view_details') && hasPermission('server:view_all');
+            // Custom check for Dashboard: only show if user has server:control permission
+            canView = hasPermission('server:control'); 
           } else if (item.requiredPermission) {
             // Standard check for other items
             canView = hasPermission(item.requiredPermission);

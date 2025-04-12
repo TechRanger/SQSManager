@@ -15,10 +15,6 @@ import { FullAdminConfig, AdminGroup, AdminEntry } from './dto/admin-config.dto'
 import { AddGroupDto } from './dto/add-group.dto'; // Import AddGroupDto
 import { AddAdminDto } from './dto/add-admin.dto'; // Import AddAdminDto
 import { RealtimeGateway } from '../shared/realtime/realtime.gateway'; // Import the gateway
-import { AuthService } from '../auth/auth.service'; // Assuming AuthService exists and can provide user/permissions
-import { Request } from 'express'; // To get user from request context
-import { Inject, Scope } from '@nestjs/common';
-import { REQUEST } from '@nestjs/core';
 
 // Define a type for the running server info
 interface RunningServerInfo {
@@ -29,7 +25,7 @@ interface RunningServerInfo {
     rconRetryTimeout?: NodeJS.Timeout;
 }
 
-@Injectable({ scope: Scope.REQUEST }) // Make service request-scoped if using REQUEST
+@Injectable()
 export class ServerInstanceService implements OnModuleDestroy, OnModuleInit {
     private readonly logger = new Logger(ServerInstanceService.name);
     // Use the defined type for the map
@@ -41,9 +37,6 @@ export class ServerInstanceService implements OnModuleDestroy, OnModuleInit {
         @InjectRepository(ServerInstance)
         private serverInstanceRepository: Repository<ServerInstance>,
         private readonly realtimeGateway: RealtimeGateway, // Inject the gateway
-        // Inject AuthService and Request
-        private readonly authService: AuthService, 
-        @Inject(REQUEST) private readonly request: Request,
     ) {
         this.loadRunningServersFromSystem(); // Attempt to find existing processes on start?
     }
@@ -260,10 +253,6 @@ Port=21114`; // Add a default port too
             throw new BadRequestException("安装路径和 RCON 密码不能为空");
         }
 
-        // Ensure RCON password is set and file is updated
-        const { installPath, rconPassword, rconPort } = createServerInstanceDto;
-        await this._updateRconConfigFileContent(installPath, { password: rconPassword, port: rconPort });
-
         const newInstance = this.serverInstanceRepository.create(createServerInstanceDto);
 
         // Validate install path existence roughly
@@ -282,35 +271,34 @@ Port=21114`; // Add a default port too
              }
         }
 
+        // --- Update Rcon.cfg before saving to DB ---
+        try {
+            await this._updateRconConfigFileContent(newInstance.installPath, { 
+                password: newInstance.rconPassword, 
+                port: newInstance.rconPort 
+            });
+        } catch (configError) {
+             // If updating config file fails, prevent DB save and re-throw
+             throw configError; 
+        }
+        // --- End Rcon.cfg update ---
+
         this.logger.log(`创建新的服务器实例配置并更新Rcon.cfg: ${newInstance.name}`);
         return this.serverInstanceRepository.save(newInstance);
     }
 
-    // Modified findAll to respect server:view_all permission
     async findAll(): Promise<ServerInstance[]> {
-        this.logger.log('findAll called');
-        const user = this.request.user as any; // Get user from request (adjust based on your auth setup)
-
-        if (!user || !user.permissions) {
-             this.logger.warn('findAll: User or permissions not found in request. Returning empty array.');
-             return []; // Or throw ForbiddenException
-        }
-
-        const canViewAll = user.permissions.includes('server:view_all');
-        const canViewDetails = user.permissions.includes('server:view_details');
-        this.logger.log(`findAll: User ${user.username} permissions check - view_all: ${canViewAll}, view_details: ${canViewDetails}`);
-
-        // If user can view all OR view details, return the basic list for dashboard/game sessions
-        if (canViewAll || canViewDetails) {
-            this.logger.log('findAll: User has view_all or view_details permission. Returning basic instance list.');
-            const instances = await this.serverInstanceRepository.find({
-                select: ["id", "name", "isRunning"]
-            });
+        this.logger.log('调用 findAll 获取所有服务器实例...');
+        try {
+            const instances = await this.serverInstanceRepository.find();
+            this.logger.log(`数据库查询完成，找到 ${instances.length} 个实例。`);
+            // Log the IDs found
+            const instanceIds = instances.map(inst => inst.id);
+            this.logger.verbose(`找到的实例 ID: [${instanceIds.join(', ')}]`);
             return instances;
-        } else {
-            // If user lacks both permissions, return empty array
-            this.logger.log('findAll: User lacks both view_all and view_details permission. Returning empty array.');
-            return []; 
+        } catch (error) {
+            this.logger.error(`findAll 查询数据库时出错: ${error.message}`, error.stack);
+            throw new InternalServerErrorException('获取服务器实例列表时发生错误');
         }
     }
 

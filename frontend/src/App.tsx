@@ -73,7 +73,7 @@ function App() {
             } />
             {/* 服务器详情 */}
             <Route path="/servers/:id" element={
-              <ProtectedRoute requiredPermission="server:view_details">
+              <ProtectedRoute requiredPermission="server:view_all">
                 <ServerDetailsPage />
               </ProtectedRoute>
             } />
