@@ -17,6 +17,7 @@ import Card from '../components/ui/Card';
 import AlertMessage from '../components/ui/AlertMessage';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import { LuPlus, LuTrash2, LuPencil, LuX, LuSave } from 'react-icons/lu'; // Import icons
+import FluentRow from '../components/ui/FluentRow';
 
 // Mock function to fetch available roles (keep for user creation dropdown)
 const fetchAvailableRolesForUser = async (): Promise<Role[]> => {
@@ -325,7 +326,7 @@ function UserManagementPage() {
                                 onChange={(e) => setNewUsername(e.target.value)}
                                 required
                                 disabled={addUserLoading}
-                                className="!mb-0"
+                                className="!mb-0 border border-neutral-stroke rounded-fluent-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
                             />
                             <FluentInput 
                                 label="密码:"
@@ -336,7 +337,7 @@ function UserManagementPage() {
                                 required
                                 minLength={6}
                                 disabled={addUserLoading}
-                                className="!mb-0"
+                                className="!mb-0 border border-neutral-stroke rounded-fluent-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
                             />
                             <FluentSelect 
                                 label="角色:"
@@ -346,7 +347,7 @@ function UserManagementPage() {
                                 options={roleOptions}
                                 required
                                 disabled={addUserLoading || rolesForUserLoading}
-                                className="!mb-0"
+                                className="!mb-0 border border-neutral-stroke rounded-fluent-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
                             />
                             <div className="flex justify-end space-x-fluent-sm">
                                 <FluentButton type="button" variant="secondary" onClick={() => setIsAddingUser(false)} disabled={addUserLoading}>
@@ -379,26 +380,21 @@ function UserManagementPage() {
                 ) : (
                     <FluentTable headers={userTableHeaders}>
                         {users.map(user => (
-                            <tr key={user.id} className="hover:bg-gray-50 text-xs">
-                                <td className="px-fluent-md py-fluent-sm whitespace-nowrap text-neutral-foreground font-medium">{user.username}</td>
-                                <td className="px-fluent-md py-fluent-sm whitespace-nowrap text-neutral-secondary">
-                                    <span className={`px-1.5 py-0.5 rounded text-[10px] ${user.role.name === 'Owner' ? 'bg-warning-background text-warning' : 'bg-neutral-background text-neutral-secondary'}`}>
-                                        {user.role.name}
-                                    </span>
-                                </td>
-                                <td className="px-fluent-md py-fluent-sm whitespace-nowrap text-right space-x-fluent-xs">
-                                    <FluentButton 
-                                        variant="danger" 
-                                        size="small" 
-                                        icon={<LuTrash2 />}
+                            <FluentRow key={user.id}>
+                                <td className="whitespace-nowrap text-gray-700">{user.username}</td>
+                                <td className="whitespace-nowrap text-gray-500">{user.role?.name || '无角色'}</td>
+                                <td className="whitespace-nowrap text-right">
+                                    <FluentButton
+                                        variant="danger"
+                                        size="small"
                                         onClick={() => handleDeleteUser(user.id, user.username)}
-                                        disabled={deletingUserId === user.id || user.role.name === 'Owner'} // Prevent deleting Owner
-                                        title={user.role.name === 'Owner' ? '无法删除 Owner' : '删除用户'}
+                                        disabled={deletingUserId === user.id}
+                                        icon={<LuTrash2 />}
                                     >
                                         {deletingUserId === user.id ? '删除中...' : '删除'}
                                     </FluentButton>
                                 </td>
-                            </tr>
+                            </FluentRow>
                         ))}
                     </FluentTable>
                 )}
@@ -469,51 +465,33 @@ function UserManagementPage() {
                 ) : (
                     <FluentTable headers={roleTableHeaders}>
                          {roles.map(role => (
-                            <tr key={role.id} className="hover:bg-gray-50 text-xs align-top">
-                                <td className="px-fluent-md py-fluent-sm whitespace-nowrap text-neutral-foreground font-medium">
-                                    {role.name}
-                                    {role.name === 'Owner' && <span className="ml-2 px-1.5 py-0.5 bg-warning-background text-warning rounded text-[10px]">系统内置</span>}
+                            <FluentRow key={role.id}>
+                                <td className="whitespace-nowrap text-gray-700">{role.name}</td>
+                                <td className="text-gray-500">{role.description || '-'}</td>
+                                <td className="whitespace-nowrap text-right">
+                                    <div className="flex justify-end space-x-2">
+                                        <FluentButton
+                                            variant="secondary"
+                                            size="small"
+                                            onClick={() => openEditPermissionsModal(role)}
+                                            icon={<LuPencil />}
+                                        >
+                                            权限
+                                        </FluentButton>
+                                        {role.name !== 'Owner' && (
+                                            <FluentButton
+                                                variant="danger"
+                                                size="small"
+                                                onClick={() => handleDeleteRole(role.id, role.name)}
+                                                disabled={deletingRoleId === role.id}
+                                                icon={<LuTrash2 />}
+                                            >
+                                                {deletingRoleId === role.id ? '删除中...' : '删除'}
+                                            </FluentButton>
+                                        )}
+                                    </div>
                                 </td>
-                                <td className="px-fluent-md py-fluent-sm text-neutral-secondary">{role.description || '-'}</td>
-                                <td className="px-fluent-md py-fluent-sm text-neutral-secondary max-w-md">
-                                     {role.name === 'Owner' ? (
-                                         <span className="italic text-xs">所有权限</span>
-                                     ) : (
-                                        (role.permissions && role.permissions.length > 0) ? (
-                                            <div className="flex flex-wrap gap-1">
-                                                {role.permissions.slice(0, 5).map(perm => (
-                                                    <span key={perm.id} className="px-1.5 py-0.5 bg-neutral-background rounded text-neutral-secondary text-[10px]">{perm.action}:{perm.resource}</span>
-                                                ))}
-                                                {role.permissions.length > 5 && <span className="text-[10px]">...等 {role.permissions.length} 项</span>}
-                                            </div>
-                                         ) : (
-                                            <span className="italic text-xs">无权限</span>
-                                         )
-                                     )}
-                                </td>
-                                <td className="px-fluent-md py-fluent-sm whitespace-nowrap text-right space-x-fluent-xs">
-                                    <FluentButton 
-                                        variant="secondary" 
-                                        size="small" 
-                                        icon={<LuPencil />}
-                                        onClick={() => openEditPermissionsModal(role)}
-                                        disabled={role.name === 'Owner'} // Disable editing Owner permissions
-                                        title={role.name === 'Owner' ? '无法编辑 Owner 权限' : '编辑权限'}
-                                    >
-                                        编辑权限
-                                    </FluentButton>
-                                    <FluentButton 
-                                        variant="danger" 
-                                        size="small" 
-                                        icon={<LuTrash2 />}
-                                        onClick={() => handleDeleteRole(role.id, role.name)}
-                                        disabled={deletingRoleId === role.id || role.name === 'Owner'} // Disable deleting Owner
-                                        title={role.name === 'Owner' ? '无法删除 Owner' : '删除角色'}
-                                    >
-                                        {deletingRoleId === role.id ? '删除中...' : '删除'}
-                                    </FluentButton>
-                                </td>
-                            </tr>
+                            </FluentRow>
                         ))}
                     </FluentTable>
                 )}

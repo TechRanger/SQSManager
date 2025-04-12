@@ -8,7 +8,7 @@ export default {
     extend: {
       // --- Fluent 2 Design Inspired Colors ---
       colors: {
-        // Brand/Accent Color (Example: Fluent Blue)
+        // Brand/Accent Color (Fluent Blue)
         brand: {
           DEFAULT: '#0078D4', // Primary
           light: '#EFF6FC',   // Tint 40
@@ -16,29 +16,29 @@ export default {
         },
         // Neutral Colors (Greys)
         neutral: {
-          background: '#F3F3F3', // Stroke 1 / Card Background
-          foreground: '#201F1E', // Foreground
+          background: '#F9F9F9', // 更浅的背景色
+          foreground: '#252423', // 略微柔和的前景色
           secondary: '#605E5C', // Secondary Text
-          stroke: '#D1D1D1',    // Stroke 2
+          stroke: '#E1E1E1',    // 更浅的描边
           disabled: '#C8C6C4', // Disabled Text
-          backgroundDisabled: '#F3F3F3', // Disabled Background
+          backgroundDisabled: '#F5F5F5', // Disabled Background
         },
-        // Status Colors
+        // Status Colors - 更符合现代设计的状态颜色
         success: {
-          DEFAULT: '#107C10', // Green
-          background: '#DFF6DD',
+          DEFAULT: '#13A10E', // 更亮的绿色
+          background: '#E6F7E6',
         },
         warning: {
-          DEFAULT: '#F07F0F', // Orange
-          background: '#FFF4CE',
+          DEFAULT: '#FFB900', // 更亮的黄色
+          background: '#FFF8E6',
         },
         danger: {
-          DEFAULT: '#D83B01', // Red
-          background: '#FDE7E9',
+          DEFAULT: '#E74C3C', // 更现代的红色
+          background: '#FDEDEB',
         },
         info: {
-          DEFAULT: '#0078D4', // Blue (same as brand for info)
-          background: '#EFF6FC',
+          DEFAULT: '#2196F3', // 更亮的蓝色
+          background: '#E6F4FD',
         },
       },
       // --- Fluent 2 Design Inspired Fonts ---

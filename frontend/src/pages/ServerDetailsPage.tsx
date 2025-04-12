@@ -15,6 +15,7 @@ import FluentTextarea from '../components/ui/FluentTextarea';
 import FluentTable from '../components/ui/FluentTable';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import AlertMessage from '../components/ui/AlertMessage';
+import FluentRow from '../components/ui/FluentRow';
 
 // 定义服务器实例的基础接口 (可以移到共享文件)
 interface ServerInstance {
@@ -630,17 +631,73 @@ function ServerDetailsPage() {
                     <Card title="实例信息 & 控制">
                         {isEditing ? (
                             <form onSubmit={(e) => { e.preventDefault(); handleSaveChanges(); }} className="space-y-fluent-md">
-                                <FluentInput label="名称:" name="name" value={editableServerData.name || ''} onChange={handleEditChange} required disabled={actionLoading === 'saving'} />
-                                <FluentInput label="安装路径:" name="installPath" value={editableServerData.installPath || ''} onChange={handleEditChange} required disabled={actionLoading === 'saving'} />
+                                <FluentInput 
+                                    label="名称:"
+                                    name="name"
+                                    value={editableServerData.name || ''}
+                                    onChange={handleEditChange}
+                                    required
+                                    disabled={actionLoading === 'saving'}
+                                    className="border border-neutral-stroke rounded-fluent-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
+                                />
+                                <FluentInput 
+                                    label="安装路径:"
+                                    name="installPath"
+                                    value={editableServerData.installPath || ''}
+                                    onChange={handleEditChange}
+                                    required
+                                    disabled={actionLoading === 'saving'}
+                                    className="border border-neutral-stroke rounded-fluent-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
+                                />
                                 <div className="grid grid-cols-2 gap-fluent-md">
-                                    <FluentInput label="游戏端口:" type="number" name="gamePort" value={editableServerData.gamePort || ''} onChange={handleEditChange} required min="1" disabled={actionLoading === 'saving'} />
-                                    <FluentInput label="查询端口:" type="number" name="queryPort" value={editableServerData.queryPort || ''} onChange={handleEditChange} required min="1" disabled={actionLoading === 'saving'} />
-                                    <FluentInput label="RCON 端口:" type="number" name="rconPort" value={editableServerData.rconPort || ''} onChange={handleEditChange} required min="1" disabled={actionLoading === 'saving'} />
-                                    <FluentInput label="信标端口:" type="number" name="beaconPort" value={editableServerData.beaconPort || ''} onChange={handleEditChange} required min="1" disabled={actionLoading === 'saving'} />
+                                    <FluentInput 
+                                        label="游戏端口:"
+                                        type="number"
+                                        name="gamePort"
+                                        value={editableServerData.gamePort || ''}
+                                        onChange={handleEditChange}
+                                        required
+                                        min="1"
+                                        disabled={actionLoading === 'saving'}
+                                        className="border border-neutral-stroke rounded-fluent-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
+                                    />
+                                    <FluentInput 
+                                        label="查询端口:"
+                                        type="number"
+                                        name="queryPort"
+                                        value={editableServerData.queryPort || ''}
+                                        onChange={handleEditChange}
+                                        required
+                                        min="1"
+                                        disabled={actionLoading === 'saving'}
+                                        className="border border-neutral-stroke rounded-fluent-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
+                                    />
+                                    <FluentInput 
+                                        label="RCON 端口:"
+                                        type="number"
+                                        name="rconPort"
+                                        value={editableServerData.rconPort || ''}
+                                        onChange={handleEditChange}
+                                        required
+                                        min="1"
+                                        disabled={actionLoading === 'saving'}
+                                        className="border border-neutral-stroke rounded-fluent-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
+                                    />
+                                    <FluentInput 
+                                        label="信标端口:"
+                                        type="number"
+                                        name="beaconPort"
+                                        value={editableServerData.beaconPort || ''}
+                                        onChange={handleEditChange}
+                                        required
+                                        min="1"
+                                        disabled={actionLoading === 'saving'}
+                                        className="border border-neutral-stroke rounded-fluent-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
+                                    />
                                 </div>
                                 <FluentInput label="RCON 密码:" type="password" name="rconPassword" value={editableServerData.rconPassword || ''} onChange={handleEditChange} placeholder="如需更改，请填写" disabled={actionLoading === 'saving'} />
                                 <FluentTextarea label="额外参数:" name="extraArgs" value={editableServerData.extraArgs || ''} onChange={handleEditChange} disabled={actionLoading === 'saving'} />
-                                <div className="flex justify-end space-x-fluent-sm pt-fluent-md border-t border-neutral-stroke">
+                                <div className="flex justify-end space-x-3 pt-5 mt-6 bg-gradient-to-r from-transparent to-gray-50">
                                     <FluentButton type="button" variant="secondary" onClick={toggleEditMode} disabled={actionLoading === 'saving'} icon={<LuX />}>
                                         取消
                                     </FluentButton>
@@ -650,21 +707,21 @@ function ServerDetailsPage() {
                                 </div>
                             </form>
                         ) : (
-                            <div className="space-y-fluent-sm text-sm text-neutral-secondary">
+                            <div className="space-y-3 text-sm text-gray-600">
                                 <p><strong>状态:</strong> {statusLoading ? (
                                     <span className="italic">加载中...</span>
                                 ) : (
-                                    <span className={`font-medium ${isServerRunning ? 'text-success' : 'text-neutral-secondary'}`}>
+                                    <span className={`font-medium ${isServerRunning ? 'text-green-600' : 'text-gray-500'}`}>
                                         {isServerRunning ? '运行中' : '已停止'}
                                     </span>
                                 )} {isServerRunning && status?.pid ? `(PID: ${status.pid})` : ''}</p>
-                                <p><strong>安装路径:</strong> <span className="font-mono bg-neutral-background px-1 rounded-fluent-sm">{server.installPath}</span></p>
+                                <p><strong>安装路径:</strong> <span className="font-mono bg-gray-50 px-2 py-1 rounded">{server.installPath}</span></p>
                                 <p><strong>游戏端口:</strong> {server.gamePort}</p>
                                 <p><strong>查询端口:</strong> {server.queryPort}</p>
                                 <p><strong>RCON 端口:</strong> {server.rconPort}</p>
                                 <p><strong>信标端口:</strong> {server.beaconPort}</p>
-                                <p><strong>额外参数:</strong> <span className="font-mono bg-neutral-background px-1 rounded-fluent-sm">{server.extraArgs || '无'}</span></p>
-                                <div className="flex justify-between items-center pt-fluent-md border-t border-neutral-stroke mt-fluent-md">
+                                <p><strong>额外参数:</strong> <span className="font-mono bg-gray-50 px-2 py-1 rounded">{server.extraArgs || '无'}</span></p>
+                                <div className="flex justify-between items-center pt-6 mt-6 bg-gradient-to-r from-white via-gray-50 to-white">
                                     <div className="flex space-x-fluent-sm">
                                         {!isServerRunning ? (
                                             <FluentButton 
@@ -713,13 +770,13 @@ function ServerDetailsPage() {
                         {statusError && <AlertMessage type="error" message={statusError} title="状态错误" className="text-xs" />}
                         {!statusLoading && !statusError && (
                             isServerRunning ? (
-                                <div className="space-y-fluent-xs text-sm text-neutral-secondary">
-                                    <p><strong>RCON 连接:</strong> {status?.rconStatus || '未知'}</p>
-                                    <p><strong>玩家数量:</strong> {status?.playerCount ?? 'N/A'}</p>
-                                    <p><strong>当前地图:</strong> {status?.currentLevel || 'N/A'}</p>
-                                    <p><strong>当前图层:</strong> {status?.currentLayer || 'N/A'}</p>
-                                    <p><strong>当前阵营:</strong> {status?.currentFactions || 'N/A'}</p>
-                                    <p><strong>下一地图:</strong> {status?.nextMap || 'N/A'}</p>
+                                <div className="space-y-3 text-sm text-gray-600">
+                                    <p><strong>RCON 连接:</strong> <span className={status?.rconStatus === 'Connected' ? 'text-green-600' : 'text-amber-600'}>{status?.rconStatus || '未知'}</span></p>
+                                    <p><strong>玩家数量:</strong> <span className="font-medium">{status?.playerCount ?? 'N/A'}</span></p>
+                                    <p><strong>当前地图:</strong> <span className="font-medium">{status?.currentLevel || 'N/A'}</span></p>
+                                    <p><strong>当前图层:</strong> <span className="font-medium">{status?.currentLayer || 'N/A'}</span></p>
+                                    <p><strong>当前阵营:</strong> <span className="font-medium">{status?.currentFactions || 'N/A'}</span></p>
+                                    <p><strong>下一地图:</strong> <span className="font-medium">{status?.nextMap || 'N/A'}</span></p>
                                 </div>
                             ) : (
                                 <AlertMessage type="info" message="服务器已停止。" />
@@ -758,32 +815,32 @@ function ServerDetailsPage() {
                                                     {activePlayers.filter(p => p.teamId === '1').length > 0 ? (
                                                         <FluentTable headers={["ID", "Name", "Steam ID", "Squad ID", "操作"]}>
                                                             {activePlayers.filter(p => p.teamId === '1').map((player) => (
-                                                                <tr key={`${player.id}-t1`} className="hover:bg-gray-50 text-xs">
-                                                                    <td className="px-fluent-md py-fluent-sm whitespace-nowrap text-neutral-foreground">{player.id}</td>
-                                                                    <td className="px-fluent-md py-fluent-sm whitespace-nowrap text-neutral-foreground max-w-xs truncate" title={player.name}>{player.name}</td>
-                                                                    <td className="px-fluent-md py-fluent-sm whitespace-nowrap text-neutral-secondary">{player.steamId}</td>
-                                                                    <td className="px-fluent-md py-fluent-sm whitespace-nowrap text-neutral-secondary">{player.squadId}</td>
-                                                                    <td className="px-fluent-md py-fluent-sm whitespace-nowrap text-right space-x-fluent-xs">
-                                                                        <FluentButton 
-                                                                            size="small"
-                                                                            variant="warning"
-                                                                            onClick={() => handleKickButtonClick(player.id)} 
-                                                                            disabled={kickLoading || playerListLoading || kickingPlayerId === player.id || banLoading || banningPlayerId === player.id} 
-                                                                            title={kickingPlayerId === player.id ? "输入踢出原因" : "踢出玩家"}
-                                                                        >
-                                                                            踢出
-                                                                        </FluentButton> 
-                                                                        <FluentButton 
-                                                                            size="small"
-                                                                            variant="danger"
-                                                                            onClick={() => handleBanButtonClick(player.id)} 
-                                                                            disabled={banLoading || playerListLoading || banningPlayerId === player.id || kickingPlayerId === player.id} 
-                                                                            title={banningPlayerId === player.id ? "输入封禁详情" : "封禁玩家"}
-                                                                        >
-                                                                            封禁
-                                                                        </FluentButton>
+                                                                <FluentRow key={`${player.id}-t1`}>
+                                                                    <td className="whitespace-nowrap text-gray-700">{player.id}</td>
+                                                                    <td className="whitespace-nowrap text-gray-700 max-w-xs truncate" title={player.name}>{player.name}</td>
+                                                                    <td className="whitespace-nowrap text-gray-500">{player.steamId}</td>
+                                                                    <td className="whitespace-nowrap text-gray-500">{player.squadId}</td>
+                                                                    <td className="whitespace-nowrap text-right">
+                                                                        <div className="flex justify-end space-x-2">
+                                                                            <FluentButton
+                                                                                variant="warning"
+                                                                                size="small"
+                                                                                onClick={() => handleKickButtonClick(player.id)}
+                                                                                disabled={!!kickingPlayerId || !isServerRunning}
+                                                                            >
+                                                                                踢出
+                                                                            </FluentButton>
+                                                                            <FluentButton
+                                                                                variant="danger"
+                                                                                size="small"
+                                                                                onClick={() => handleBanButtonClick(player.id)}
+                                                                                disabled={!!banningPlayerId || !isServerRunning}
+                                                                            >
+                                                                                封禁
+                                                                            </FluentButton>
+                                                                        </div>
                                                                     </td>
-                                                                </tr>
+                                                                </FluentRow>
                                                             ))}
                                                         </FluentTable>
                                                     ) : (
@@ -795,32 +852,32 @@ function ServerDetailsPage() {
                                                     {activePlayers.filter(p => p.teamId === '2').length > 0 ? (
                                                         <FluentTable headers={["ID", "Name", "Steam ID", "Squad ID", "操作"]}>
                                                             {activePlayers.filter(p => p.teamId === '2').map((player) => (
-                                                                 <tr key={`${player.id}-t2`} className="hover:bg-gray-50 text-xs">
-                                                                    <td className="px-fluent-md py-fluent-sm whitespace-nowrap text-neutral-foreground">{player.id}</td>
-                                                                    <td className="px-fluent-md py-fluent-sm whitespace-nowrap text-neutral-foreground max-w-xs truncate" title={player.name}>{player.name}</td>
-                                                                    <td className="px-fluent-md py-fluent-sm whitespace-nowrap text-neutral-secondary">{player.steamId}</td>
-                                                                    <td className="px-fluent-md py-fluent-sm whitespace-nowrap text-neutral-secondary">{player.squadId}</td>
-                                                                    <td className="px-fluent-md py-fluent-sm whitespace-nowrap text-right space-x-fluent-xs">
-                                                                        <FluentButton 
-                                                                            size="small"
-                                                                            variant="warning"
-                                                                            onClick={() => handleKickButtonClick(player.id)} 
-                                                                            disabled={kickLoading || playerListLoading || kickingPlayerId === player.id || banLoading || banningPlayerId === player.id} 
-                                                                            title={kickingPlayerId === player.id ? "输入踢出原因" : "踢出玩家"}
-                                                                        >
-                                                                            踢出
-                                                                        </FluentButton> 
-                                                                        <FluentButton 
-                                                                            size="small"
-                                                                            variant="danger"
-                                                                            onClick={() => handleBanButtonClick(player.id)} 
-                                                                            disabled={banLoading || playerListLoading || banningPlayerId === player.id || kickingPlayerId === player.id} 
-                                                                            title={banningPlayerId === player.id ? "输入封禁详情" : "封禁玩家"}
-                                                                        >
-                                                                            封禁
-                                                                        </FluentButton>
+                                                                 <FluentRow key={`${player.id}-t2`}>
+                                                                    <td className="whitespace-nowrap text-gray-700">{player.id}</td>
+                                                                    <td className="whitespace-nowrap text-gray-700 max-w-xs truncate" title={player.name}>{player.name}</td>
+                                                                    <td className="whitespace-nowrap text-gray-500">{player.steamId}</td>
+                                                                    <td className="whitespace-nowrap text-gray-500">{player.squadId}</td>
+                                                                    <td className="whitespace-nowrap text-right">
+                                                                        <div className="flex justify-end space-x-2">
+                                                                            <FluentButton
+                                                                                variant="warning"
+                                                                                size="small"
+                                                                                onClick={() => handleKickButtonClick(player.id)}
+                                                                                disabled={!!kickingPlayerId || !isServerRunning}
+                                                                            >
+                                                                                踢出
+                                                                            </FluentButton>
+                                                                            <FluentButton
+                                                                                variant="danger"
+                                                                                size="small"
+                                                                                onClick={() => handleBanButtonClick(player.id)}
+                                                                                disabled={!!banningPlayerId || !isServerRunning}
+                                                                            >
+                                                                                封禁
+                                                                            </FluentButton>
+                                                                        </div>
                                                                     </td>
-                                                                </tr>
+                                                                </FluentRow>
                                                             ))}
                                                         </FluentTable>
                                                     ) : (
@@ -831,8 +888,8 @@ function ServerDetailsPage() {
                                         )}
                                         
                                         {kickingPlayerId !== null && (
-                                            <div className="mt-fluent-lg p-fluent-md border border-warning rounded-fluent-md bg-warning-background space-y-fluent-sm">
-                                                <h4 className="text-md font-semibold text-warning">踢出玩家: {activePlayers?.find(p => p.id === kickingPlayerId)?.name || `ID: ${kickingPlayerId}`}</h4>
+                                            <div className="mt-6 p-5 rounded-xl bg-gradient-to-r from-amber-50 to-amber-100 shadow-md space-y-3">
+                                                <h4 className="text-md font-semibold text-amber-700">踢出玩家: {activePlayers?.find(p => p.id === kickingPlayerId)?.name || `ID: ${kickingPlayerId}`}</h4>
                                                 <FluentInput 
                                                     label="原因:" 
                                                     id="kickReason" 
@@ -842,8 +899,8 @@ function ServerDetailsPage() {
                                                     disabled={kickLoading} 
                                                     className="!mb-0"
                                                 />
-                                                {kickError && <AlertMessage type="error" message={kickError} className="text-xs !p-fluent-xs !mt-fluent-xs" />}
-                                                <div className="flex justify-end space-x-fluent-sm">
+                                                {kickError && <AlertMessage type="error" message={kickError} className="text-xs !p-3 !mt-2" />}
+                                                <div className="flex justify-end space-x-3 pt-3">
                                                     <FluentButton variant="secondary" onClick={handleCancelKick} disabled={kickLoading}>
                                                         取消
                                                     </FluentButton>
@@ -855,15 +912,15 @@ function ServerDetailsPage() {
                                         )}
 
                                         {banningPlayerId !== null && (
-                                            <div className="mt-fluent-lg p-fluent-md border border-danger rounded-fluent-md bg-danger-background space-y-fluent-sm">
-                                                 <h4 className="text-md font-semibold text-danger">封禁玩家: {activePlayers?.find(p => p.id === banningPlayerId)?.name || `ID: ${banningPlayerId}`}</h4>
-                                                <div className="flex space-x-fluent-lg text-sm">
-                                                    <label className="flex items-center space-x-fluent-xs cursor-pointer">
-                                                        <input type="radio" name="banType" value="permanent" checked={banType === 'permanent'} onChange={() => setBanType('permanent')} disabled={banLoading} className="focus:ring-danger text-danger"/>
+                                            <div className="mt-6 p-5 rounded-xl bg-gradient-to-r from-red-50 to-red-100 shadow-md space-y-3">
+                                                 <h4 className="text-md font-semibold text-red-700">封禁玩家: {activePlayers?.find(p => p.id === banningPlayerId)?.name || `ID: ${banningPlayerId}`}</h4>
+                                                <div className="flex space-x-6 text-sm">
+                                                    <label className="flex items-center space-x-2 cursor-pointer">
+                                                        <input type="radio" name="banType" value="permanent" checked={banType === 'permanent'} onChange={() => setBanType('permanent')} disabled={banLoading} className="focus:ring-red-500 text-red-600"/>
                                                         <span>永久封禁</span>
                                                     </label>
-                                                    <label className="flex items-center space-x-fluent-xs cursor-pointer">
-                                                        <input type="radio" name="banType" value="duration" checked={banType === 'duration'} onChange={() => setBanType('duration')} disabled={banLoading} className="focus:ring-danger text-danger"/>
+                                                    <label className="flex items-center space-x-2 cursor-pointer">
+                                                        <input type="radio" name="banType" value="duration" checked={banType === 'duration'} onChange={() => setBanType('duration')} disabled={banLoading} className="focus:ring-red-500 text-red-600"/>
                                                         <span>持续时间</span>
                                                     </label>
                                                 </div>
@@ -889,8 +946,8 @@ function ServerDetailsPage() {
                                                     required
                                                     className="!mb-0"
                                                 />
-                                                {banError && <AlertMessage type="error" message={banError} className="text-xs !p-fluent-xs !mt-fluent-xs" />}
-                                                <div className="flex justify-end space-x-fluent-sm">
+                                                {banError && <AlertMessage type="error" message={banError} className="text-xs !p-3 !mt-2" />}
+                                                <div className="flex justify-end space-x-3 pt-3">
                                                     <FluentButton variant="secondary" onClick={handleCancelBan} disabled={banLoading}>
                                                         取消
                                                     </FluentButton>
@@ -906,12 +963,12 @@ function ServerDetailsPage() {
                                             {disconnectedPlayers !== null && disconnectedPlayers.length > 0 && (
                                                <FluentTable headers={["ID", "Name", "Steam ID", "EOS ID"]}>
                                                    {disconnectedPlayers.map((player) => (
-                                                        <tr key={`${player.id}-disconnected`} className="hover:bg-gray-50 text-xs">
-                                                           <td className="px-fluent-md py-fluent-sm whitespace-nowrap text-neutral-foreground">{player.id}</td>
-                                                           <td className="px-fluent-md py-fluent-sm whitespace-nowrap text-neutral-foreground max-w-xs truncate" title={player.name}>{player.name}</td>
-                                                           <td className="px-fluent-md py-fluent-sm whitespace-nowrap text-neutral-secondary">{player.steamId}</td>
-                                                           <td className="px-fluent-md py-fluent-sm whitespace-nowrap text-neutral-secondary">{player.eosId}</td>
-                                                        </tr>
+                                                        <FluentRow key={`${player.id}-disconnected`}>
+                                                            <td className="whitespace-nowrap text-gray-700">{player.id}</td>
+                                                            <td className="whitespace-nowrap text-gray-700 max-w-xs truncate" title={player.name}>{player.name}</td>
+                                                            <td className="whitespace-nowrap text-gray-500">{player.steamId}</td>
+                                                            <td className="whitespace-nowrap text-gray-500">{player.eosId}</td>
+                                                        </FluentRow>
                                                     ))}
                                                 </FluentTable>
                                             )}

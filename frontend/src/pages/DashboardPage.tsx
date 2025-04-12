@@ -254,37 +254,35 @@ function DashboardPage() {
                     const isLoading = currentLoadingState !== 'idle';
 
                     return (
-                        <div key={server.id} className={`bg-white border border-neutral-stroke rounded-fluent-lg shadow-fluent-sm transition-shadow hover:shadow-fluent-md overflow-hidden flex flex-col`}>
+                        <div key={server.id} className={`bg-white rounded-xl shadow-md hover:shadow-lg transition-shadow duration-300 overflow-hidden flex flex-col`}>
                             {/* Card Header */}
-                            <div className="p-fluent-lg border-b border-neutral-stroke">
-                                <div className="flex justify-between items-center mb-fluent-xs">
-                                    <h3 className="text-lg font-semibold text-neutral-foreground truncate mr-2">
-                                        <Link to={`/server/${server.id}`} className="hover:text-brand hover:underline">
+                            <div className="px-6 py-4 bg-gray-50">
+                                <div className="flex justify-between items-center mb-2">
+                                    <h3 className="text-lg font-semibold text-gray-800 truncate mr-2">
+                                        <Link to={`/servers/${server.id}`} className="hover:text-blue-600 hover:underline">
                                             {server.name}
                                         </Link>
                                     </h3>
-                                    <span className={`px-fluent-sm py-fluent-xs rounded-full text-xs font-medium ${server.isRunning ? 'bg-success-background text-success' : 'bg-neutral-background text-neutral-secondary'}`}>
+                                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${server.isRunning ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
                                         {server.isRunning ? '运行中' : '已停止'}
                                     </span>
                                 </div>
-                                <p className="text-sm text-neutral-secondary truncate" title={server.installPath}>路径: {server.installPath}</p>
+                                <p className="text-sm text-gray-500 truncate" title={server.installPath}>路径: {server.installPath}</p>
                             </div>
 
                             {/* Card Body (Basic Info & Status) */}
-                            <div className="p-fluent-lg space-y-fluent-sm text-sm text-neutral-secondary flex-grow">
+                            <div className="p-6 space-y-3 text-sm text-gray-600 flex-grow">
                                 <p><strong>端口:</strong> Game {server.gamePort} | Query {server.queryPort} | RCON {server.rconPort}</p>
                                 {server.isRunning && (
-                                    <div className="space-y-fluent-xs pl-fluent-sm border-l-2 border-neutral-stroke">
+                                    <div className="space-y-2 pl-3 border-l-2 border-gray-200">
                                         {server.pid && <p><strong>PID:</strong> {server.pid}</p>}
                                         {server.rconStatus ? (
                                             <>
-                                                <p><strong>RCON:</strong> {server.rconStatus}</p>
+                                                <p><strong>RCON:</strong> <span className={server.rconStatus === 'Connected' ? 'text-green-600' : 'text-amber-600'}>{server.rconStatus}</span></p>
                                                 {(server.rconStatus === 'Connected' || server.rconStatus === 'Error Querying') && (
                                                     <>
-                                                        <p><strong>玩家:</strong> {server.playerCount ?? '-'}</p>
-                                                        <p><strong>地图:</strong> {server.currentLevel || '-'} ({server.currentLayer || '-'})</p>
-                                                        {/* <p><strong>阵营:</strong> {server.currentFactions || '-'}</p> */}
-                                                        {/* <p><strong>下一地图:</strong> {server.nextMap || '-'}</p> */}
+                                                        <p><strong>玩家:</strong> <span className="font-medium">{server.playerCount ?? '-'}</span></p>
+                                                        <p><strong>地图:</strong> <span className="font-medium">{server.currentLevel || '-'} ({server.currentLayer || '-'})</span></p>
                                                     </>
                                                 )}
                                             </>
@@ -294,9 +292,9 @@ function DashboardPage() {
                             </div>
 
                             {/* Card Footer (Actions) */}
-                            <div className="p-fluent-md bg-neutral-background border-t border-neutral-stroke flex justify-end space-x-fluent-sm">
+                            <div className="px-6 py-4 bg-gray-50 flex justify-end space-x-3">
                                 <FluentButton
-                                    variant={server.isRunning ? 'warning' : 'success'}
+                                    variant={server.isRunning ? 'warning' : 'primary'}
                                     onClick={() => handleAction(server.isRunning ? 'stop' : 'start', server.id)}
                                     disabled={isLoading}
                                     icon={server.isRunning ? <LuSquare /> : <LuPlay />}

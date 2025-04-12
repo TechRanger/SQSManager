@@ -10,17 +10,17 @@ interface CardProps {
 
 const Card: React.FC<CardProps> = ({ title, children, className, actions }) => {
   return (
-    <div className={`bg-white border border-neutral-stroke rounded-fluent-lg shadow-fluent-sm flex flex-col ${className}`}>
+    <div className={`bg-white rounded-xl shadow-md hover:shadow-lg transition-shadow duration-300 flex flex-col overflow-hidden ${className}`}>
       {title && (
-        <div className="p-fluent-lg border-b border-neutral-stroke">
-          <h3 className="text-lg font-semibold text-neutral-foreground">{title}</h3>
+        <div className="px-6 py-4 bg-gray-50">
+          <h3 className="text-lg font-semibold text-gray-800">{title}</h3>
         </div>
       )}
-      <div className="p-fluent-lg flex-grow">
+      <div className="p-6 flex-grow">
         {children}
       </div>
       {actions && (
-        <div className="p-fluent-md bg-neutral-background border-t border-neutral-stroke flex justify-end space-x-fluent-sm">
+        <div className="px-6 py-4 bg-gray-50 flex justify-end space-x-3">
           {actions}
         </div>
       )}

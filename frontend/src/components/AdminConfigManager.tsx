@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FullAdminConfig, AdminGroup, AdminEntry } from '../types/admin-config';
+import { FullAdminConfig, AdminEntry } from '../types/admin-config';
 import { AddGroupDto } from '../types/add-group.dto';
 import { AddAdminDto } from '../types/add-admin.dto';
 // Import shared UI components
@@ -7,6 +7,8 @@ import FluentButton from './ui/FluentButton';
 import FluentTable from './ui/FluentTable';
 import FluentInput from './ui/FluentInput';
 import FluentSelect from './ui/FluentSelect';
+import FluentRow from './ui/FluentRow';
+import { Trash2 } from 'lucide-react';
 
 // --- Remove Reusable Fluent UI Components (Temporary definitions) ---
 // interface FluentButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -283,26 +285,21 @@ const AdminConfigManager: React.FC<AdminConfigManagerProps> = ({
                 {config.groups.length > 0 ? (
                     <FluentTable headers={["组名", "权限", "操作"]} className="mt-fluent-md">
                         {config.groups.map(group => (
-                            <tr key={group.name} className="hover:bg-gray-50 text-xs">
-                                <td className="px-fluent-md py-fluent-sm whitespace-nowrap text-neutral-foreground font-medium">{group.name}</td>
-                                <td className="px-fluent-md py-fluent-sm text-neutral-secondary max-w-xl">
-                                    <div className="flex flex-wrap gap-1">
-                                        {group.permissions.map(perm => (
-                                            <span key={perm} className="px-1.5 py-0.5 bg-neutral-background rounded text-neutral-secondary text-[10px]">{perm}</span>
-                                        ))}
-                                    </div>
-                                </td>
-                                <td className="px-fluent-md py-fluent-sm whitespace-nowrap text-right">
-                                    <FluentButton 
-                                        variant="danger" 
-                                        size="small" 
+                            <FluentRow key={group.name}>
+                                <td className="whitespace-nowrap text-gray-700">{group.name}</td>
+                                <td className="whitespace-nowrap text-gray-500">{group.permissions.join(', ') || '无权限'}</td>
+                                <td className="whitespace-nowrap text-right">
+                                    <FluentButton
+                                        variant="danger"
+                                        size="small"
                                         onClick={() => handleDeleteGroup(group.name)}
                                         disabled={deletingGroup === group.name}
+                                        icon={<Trash2 />}
                                     >
-                                        {deletingGroup === group.name ? '删除中...' : '删除'}
+                                        {deletingGroup === group.name ? '删除中...' : '删除组'}
                                     </FluentButton>
                                 </td>
-                            </tr>
+                            </FluentRow>
                         ))}
                     </FluentTable>
                 ) : (
@@ -349,6 +346,7 @@ const AdminConfigManager: React.FC<AdminConfigManagerProps> = ({
                                 onChange={(e) => setNewAdminGroup(e.target.value)}
                                 required
                                 disabled={addAdminLoading || config.groups.length === 0}
+                                options={config.groups.map(group => ({ value: group.name, label: group.name }))}
                              >
                                 <option value="" disabled>-- 选择一个组 --</option>
                                 {config.groups.map(group => (
@@ -384,10 +382,10 @@ const AdminConfigManager: React.FC<AdminConfigManagerProps> = ({
                                     const key = `${admin.steamId}:${admin.groupName}`;
                                     const isDeletingThis = deletingAdminKey === key;
                                     return (
-                                        <tr key={key} className="hover:bg-gray-50 text-xs">
-                                            <td className="px-fluent-md py-fluent-sm whitespace-nowrap text-neutral-foreground font-mono">{admin.steamId}</td>
-                                            <td className="px-fluent-md py-fluent-sm text-neutral-secondary">{admin.comment || '-'}</td>
-                                            <td className="px-fluent-md py-fluent-sm whitespace-nowrap text-right">
+                                        <FluentRow key={key}>
+                                            <td className="whitespace-nowrap text-gray-700 font-mono">{admin.steamId}</td>
+                                            <td className="text-gray-500">{admin.comment || '-'}</td>
+                                            <td className="whitespace-nowrap text-right">
                                                 <FluentButton 
                                                     variant="danger" 
                                                     size="small" 
@@ -397,7 +395,7 @@ const AdminConfigManager: React.FC<AdminConfigManagerProps> = ({
                                                     {isDeletingThis ? '删除中...' : '删除'}
                                                 </FluentButton>
                                             </td>
-                                        </tr>
+                                        </FluentRow>
                                     );
                                 })}
                             </FluentTable>

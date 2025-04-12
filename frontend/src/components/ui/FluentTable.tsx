@@ -8,23 +8,22 @@ interface FluentTableProps {
 
 const FluentTable: React.FC<FluentTableProps> = ({ headers, children, className }) => {
   return (
-    <div className={`overflow-x-auto border border-neutral-stroke rounded-fluent-md ${className}`}>
-      <table className="min-w-full divide-y divide-neutral-stroke">
-        <thead className="bg-neutral-background"> {/* Use neutral-background for header */}
+    <div className={`overflow-x-auto rounded-lg ${className}`}>
+      <table className="min-w-full border-separate" style={{ borderSpacing: '0 0.75rem' }}>
+        <thead>
           <tr>
             {headers.map((header, index) => (
               <th
                 key={index}
                 scope="col"
-                // Consistent padding and text styles from example usage
-                className="px-fluent-md py-fluent-sm text-left text-xs font-medium text-neutral-secondary uppercase tracking-wider"
+                className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
               >
                 {header}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody className="bg-white divide-y divide-neutral-stroke">
+        <tbody>
           {children}
         </tbody>
       </table>

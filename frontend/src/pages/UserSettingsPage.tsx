@@ -63,7 +63,7 @@ function UserSettingsPage() {
                      )}
                      
                      <FluentInput 
-                        label="当前密码:"
+                        label="当前密码:" 
                         type="password" 
                         id="currentPassword" 
                         value={currentPassword} 
@@ -71,10 +71,10 @@ function UserSettingsPage() {
                         required 
                         disabled={isLoading}
                         autoComplete="current-password"
-                        className="!mb-0"
+                        className="!mb-0 border border-neutral-stroke rounded-fluent-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
                     />
                     <FluentInput 
-                        label="新密码:"
+                        label="新密码:" 
                         type="password" 
                         id="newPassword" 
                         value={newPassword} 
@@ -83,10 +83,10 @@ function UserSettingsPage() {
                         minLength={6}
                         disabled={isLoading}
                         autoComplete="new-password"
-                        className="!mb-0"
+                        className="!mb-0 border border-neutral-stroke rounded-fluent-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
                     />
                     <FluentInput 
-                        label="确认新密码:"
+                        label="确认新密码:" 
                         type="password" 
                         id="confirmPassword" 
                         value={confirmPassword} 
@@ -95,7 +95,7 @@ function UserSettingsPage() {
                         minLength={6}
                         disabled={isLoading}
                         autoComplete="new-password"
-                        className="!mb-0"
+                        className="!mb-0 border border-neutral-stroke rounded-fluent-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
                     />
                     <div className="pt-fluent-md border-t border-neutral-stroke flex justify-end">
                         <FluentButton 

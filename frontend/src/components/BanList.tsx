@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { BanEntry } from '../types/ban';
 // Import shared UI components
-import FluentButton from './ui/FluentButton'; // Correct relative path from components/
-import FluentTable from './ui/FluentTable';   // Correct relative path from components/
+import FluentButton from './ui/FluentButton';
+import FluentTable from './ui/FluentTable';
+import FluentRow from './ui/FluentRow';
 
 // --- Remove Reusable Fluent UI Components (Temporary definitions) ---
 // interface FluentButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -65,24 +66,24 @@ const BanList: React.FC<BanListProps> = ({
         }
     };
 
-    if (isLoading) return <p className="text-sm text-neutral-secondary italic">正在加载 Ban 列表...</p>;
-    if (error) return <p className="text-sm text-danger">加载 Ban 列表失败: {error}</p>;
-    if (!bans || bans.length === 0) return <p className="text-sm text-neutral-secondary italic">当前没有 Ban 记录。</p>;
+    if (isLoading) return <p className="text-sm text-gray-500 italic">正在加载 Ban 列表...</p>;
+    if (error) return <p className="text-sm text-red-500">加载 Ban 列表失败: {error}</p>;
+    if (!bans || bans.length === 0) return <p className="text-sm text-gray-500 italic">当前没有 Ban 记录。</p>;
 
     const tableHeaders = ["EOS ID", "过期时间", "原因/注释", "操作"];
 
     return (
-        <div className="space-y-fluent-sm">
-            <h4 className="text-md font-semibold text-neutral-foreground">Ban 列表 ({bans.length} 条记录)</h4>
+        <div className="space-y-4">
+            <h4 className="text-md font-semibold text-gray-700">Ban 列表 ({bans.length} 条记录)</h4>
             <FluentTable headers={tableHeaders}>
                 {bans.map((ban, index) => {
                     const isUnbanningThis = unbanningLine === ban.originalLine;
                     return (
-                        <tr key={index} className="hover:bg-gray-50 text-xs">
-                            <td className="px-fluent-md py-fluent-sm whitespace-nowrap text-neutral-secondary font-mono">{ban.bannedEosId || 'N/A'}</td>
-                            <td className="px-fluent-md py-fluent-sm whitespace-nowrap text-neutral-foreground">{formatTimestamp(ban.expirationTimestamp)}</td>
-                            <td className="px-fluent-md py-fluent-sm text-neutral-foreground max-w-md truncate" title={ban.comment || '无'}>{ban.comment || '-'}</td>
-                            <td className="px-fluent-md py-fluent-sm whitespace-nowrap text-right">
+                        <FluentRow key={index}>
+                            <td className="whitespace-nowrap text-gray-500 font-mono">{ban.bannedEosId || 'N/A'}</td>
+                            <td className="whitespace-nowrap text-gray-700">{formatTimestamp(ban.expirationTimestamp)}</td>
+                            <td className="text-gray-700 max-w-md truncate" title={ban.comment || '无'}>{ban.comment || '-'}</td>
+                            <td className="whitespace-nowrap text-right">
                                 <FluentButton 
                                     size="small" 
                                     variant="danger" 
@@ -92,7 +93,7 @@ const BanList: React.FC<BanListProps> = ({
                                     {isUnbanningThis ? '处理中...' : '解 Ban'}
                                 </FluentButton>
                             </td>
-                        </tr>
+                        </FluentRow>
                     );
                 })}
             </FluentTable>
