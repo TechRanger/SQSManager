@@ -392,9 +392,20 @@ function ServerDetailsPage() {
             {/* Page Header */}
             <div className="flex justify-between items-center">
                 <h2 className="text-2xl font-semibold text-neutral-foreground">服务器: {server.name}</h2>
-                <Link to="/">
-                    <FluentButton variant="secondary" icon={<LuArrowLeft />}>返回仪表盘</FluentButton>
-                </Link>
+                <div className="flex items-center space-x-4">
+                     <FluentButton 
+                         variant="secondary" 
+                         size="small" 
+                         onClick={fetchServerStatus} 
+                         disabled={statusLoading || !isServerRunning} 
+                         icon={<LuRotateCcw />}
+                     >
+                         {statusLoading ? '刷新中...' : '刷新'}
+                     </FluentButton>
+                    <Link to="/">
+                        <FluentButton variant="secondary" icon={<LuArrowLeft />}>返回仪表盘</FluentButton>
+                    </Link>
+                </div>
             </div>
 
             {/* Non-critical Error Display */}
@@ -409,7 +420,7 @@ function ServerDetailsPage() {
                 <div className="lg:col-span-2">
                     <Card title={
                         <div className="flex items-center justify-between w-full">
-                            <span>服务器基本参数</span>
+                            <span className="mr-4">基本参数</span>
                             <div className="flex items-center">
                                 {!isEditing && (
                                     <FluentButton 
@@ -575,11 +586,7 @@ function ServerDetailsPage() {
 
                 {/* --- Live Status Card (Column 2) --- */}
                 <div className="lg:col-span-1">
-                    <Card title="实时状态" actions={
-                         <FluentButton variant="secondary" size="small" onClick={fetchServerStatus} disabled={statusLoading || !isServerRunning} icon={<LuRotateCcw />}>
-                             {statusLoading ? '刷新中...' : '刷新'}
-                         </FluentButton>
-                    }>
+                    <Card title="实时状态">
                         {statusLoading && <LoadingSpinner text="加载状态..." size="small" />}
                         {statusError && <AlertMessage type="error" message={statusError} title="状态错误" className="text-xs" />}
                         {!statusLoading && !statusError && (

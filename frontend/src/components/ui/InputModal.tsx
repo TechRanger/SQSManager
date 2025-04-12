@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Dialog, DialogTitle, DialogContent, DialogActions, TextField, Button } from '@mui/material';
+import { Dialog, DialogTitle, DialogContent, DialogActions, TextField } from '@mui/material';
 import FluentButton from './FluentButton'; // Assuming FluentButton can be used
 
 interface InputModalProps {

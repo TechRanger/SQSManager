@@ -1,11 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { io, Socket } from 'socket.io-client';
 import Card from '../components/ui/Card';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import AlertMessage from '../components/ui/AlertMessage';
 import FluentButton from '../components/ui/FluentButton';
-import { LuArrowLeft } from 'react-icons/lu';
 
 const backendPort = 3000;
 const socketURL = `${window.location.protocol}//${window.location.hostname}:${backendPort}/realtime`;

@@ -1,4 +1,3 @@
-import React from 'react';
 import { BrowserRouter as Router, Route, Routes, useLocation, Navigate } from 'react-router-dom';
 import DashboardPage from './pages/DashboardPage';
 import ServerDetailsPage from './pages/ServerDetailsPage';

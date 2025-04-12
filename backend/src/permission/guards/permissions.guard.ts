@@ -65,14 +65,22 @@ export class PermissionsGuard implements CanActivate {
 
     const userPermissions = userDetails.role.permissions.map(p => p.name);
 
-    const hasAllPermissions = requiredPermissions.every(permission =>
-      userPermissions.includes(permission),
+    // 添加特殊处理: 如果用户拥有user:manage权限,视为拥有所有user:开头的权限
+    const hasUserManagePermission = userPermissions.includes('user:manage');
+
+    const hasAllPermissions = requiredPermissions.every(permission => 
+      userPermissions.includes(permission) || 
+      (hasUserManagePermission && permission.startsWith('user:'))
     );
 
     this.logger.verbose(`Permission check result for user ${userId}: ${hasAllPermissions}`);
 
     if (!hasAllPermissions) {
-      const missingPermissions = requiredPermissions.filter(p => !userPermissions.includes(p));
+      // 排除已有的权限和因为user:manage而自动获得的权限
+      const missingPermissions = requiredPermissions.filter(p => 
+        !userPermissions.includes(p) && 
+        !(hasUserManagePermission && p.startsWith('user:'))
+      );
       this.logger.warn(`User ${userId} denied access. Missing permissions: ${missingPermissions.join(', ')}`);
       throw new ForbiddenException(`Insufficient permissions. Missing: ${missingPermissions.join(', ')}`);
     }

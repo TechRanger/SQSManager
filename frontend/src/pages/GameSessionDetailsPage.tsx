@@ -16,9 +16,8 @@ import LoadingSpinner from '../components/ui/LoadingSpinner';
 import FluentTable from '../components/ui/FluentTable';
 import FluentRow from '../components/ui/FluentRow';
 import BanList from '../components/BanList';
-import { LuRefreshCw, LuArrowLeft, LuSend, LuTrash, LuUserX, LuToggleLeft, LuToggleRight, LuSettings, LuX, LuTriangle, LuUsers, LuArrowRightLeft, LuRotateCw, LuFlag, LuMap, LuMapPin } from "react-icons/lu";
+import { LuRefreshCw, LuArrowLeft, LuSend, LuTrash, LuUserX, LuToggleLeft, LuToggleRight, LuSettings, LuX, LuTriangle, LuUsers, LuArrowRightLeft, LuRotateCw, LuMap, LuMapPin } from "react-icons/lu";
 import { BanEntry } from '../types/ban';
-import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Checkbox, TextField, Typography } from '@mui/material';
 
 // 玩家接口
 interface Player {
@@ -169,13 +168,11 @@ function GameSessionDetailsPage() {
   const [banModalOpen, setBanModalOpen] = useState(false);
   const [playerToBan, setPlayerToBan] = useState<Player | null>(null);
   const [banReason, setBanReason] = useState('');
-  const [banLength, setBanLength] = useState('0'); // 默认为永久封禁
   const [isPermanentBan, setIsPermanentBan] = useState(true); // 是否永久封禁
   const [banEndDate, setBanEndDate] = useState<string>(
     new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] // 默认7天后
   );
   const [isBanning, setIsBanning] = useState(false);
-  const [customBanLength, setCustomBanLength] = useState<string>("");
   
   // 警告玩家
   const [warnModalOpen, setWarnModalOpen] = useState(false);
@@ -437,11 +434,9 @@ hasSquad值: ${player.hasSquad}
   const openBanModal = (player: Player) => {
     setPlayerToBan(player);
     setBanReason("");
-    setBanLength("0");
-    setCustomBanLength("");
-    // 默认设置为非永久封禁，显示日期选择器
-    setIsPermanentBan(false);
-    // 设置默认结束日期为7天后
+    // 设置默认为永久封禁，然后设置永久封禁标志
+    setIsPermanentBan(true);
+    // 设置默认结束日期为7天后（用于非永久封禁情况）
     const defaultEndDate = new Date();
     defaultEndDate.setDate(defaultEndDate.getDate() + 7);
     setBanEndDate(defaultEndDate.toISOString().split('T')[0]);
@@ -455,48 +450,12 @@ hasSquad值: ${player.hasSquad}
     
     setIsBanning(true);
     try {
-      // 计算封禁时长
-      let finalBanLength = "0"; // 默认为永久封禁
-      
-      if (!isPermanentBan && banEndDate) {
-        // 使用用户选择的日期进行时长计算
-        const now = new Date();
-        const endDate = new Date(banEndDate);
-        
-        // 计算时间差（毫秒）
-        const timeDiff = endDate.getTime() - now.getTime();
-        
-        if (timeDiff <= 0) {
-          throw new Error("封禁结束日期必须在当前时间之后");
-        }
-        
-        // 转换为小时
-        const hoursDiff = Math.ceil(timeDiff / (1000 * 60 * 60));
-        
-        // 根据时间差选择合适的单位
-        if (hoursDiff <= 24) {
-          // 小于24小时，用小时表示
-          finalBanLength = `${hoursDiff}h`;
-        } else if (hoursDiff <= 24 * 30) {
-          // 小于30天，用天表示
-          const daysDiff = Math.ceil(hoursDiff / 24);
-          finalBanLength = `${daysDiff}d`;
-        } else if (hoursDiff <= 24 * 30 * 12) {
-          // 小于1年，用月表示
-          const monthsDiff = Math.ceil(hoursDiff / (24 * 30));
-          finalBanLength = `${monthsDiff}mo`;
-        } else {
-          // 大于1年，用年表示
-          const yearsDiff = Math.ceil(hoursDiff / (24 * 365));
-          finalBanLength = `${yearsDiff}y`;
-        }
-      }
-      
       // 确保有封禁原因，如果用户未提供则使用默认值
       const finalBanReason = banReason.trim() || "违反服务器规则";
       
-      // 构建并发送RCON命令 - 严格按照 AdminBan <SteamId> <BanLength> <BanReason> 格式
-      const command = `AdminBan "${playerToBan.steamId}" ${finalBanLength} "${finalBanReason}"`;
+      // 构建并发送RCON命令 - 使用 AdminBan <SteamId> <BanReason> 格式
+      // 注意：此处我们使用永久封禁模式，不需要时长参数
+      const command = `AdminBan "${playerToBan.steamId}" "${finalBanReason}"`;
       const response = await sendRconCommand(parseInt(id), command);
       
       // 修改成功判断条件，同时支持中英文成功消息
@@ -1585,7 +1544,7 @@ hasSquad值: ${player.hasSquad}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                     />
                     <p className="mt-1 text-xs text-gray-500">
-                      系统将自动计算从现在到选择日期的封禁时长
+                      此日期仅用于显示，实际封禁将使用永久封禁
                     </p>
                   </div>
                 )}

@@ -16,18 +16,8 @@ import FluentSelect from '../components/ui/FluentSelect';
 import Card from '../components/ui/Card';
 import AlertMessage from '../components/ui/AlertMessage';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
-import { LuPlus, LuTrash2, LuPencil, LuX, LuSave } from 'react-icons/lu'; // Import icons
+import { LuPlus, LuTrash2, LuPencil, LuSave } from 'react-icons/lu'; // Import icons
 import FluentRow from '../components/ui/FluentRow';
-
-// Mock function to fetch available roles (keep for user creation dropdown)
-const fetchAvailableRolesForUser = async (): Promise<Role[]> => {
-    console.warn("Using mock roles for UserManagementPage - User creation. Implement API call!");
-    return [
-        // { id: 1, name: 'Owner', description: 'System Owner' },
-        { id: 2, name: 'Admin', description: 'Administrator' },
-        { id: 3, name: 'Moderator', description: 'Content Moderator' },
-    ];
-};
 
 function UserManagementPage() {
     // --- User States ---
@@ -299,7 +289,7 @@ function UserManagementPage() {
         <div className="space-y-fluent-2xl">
             {/* --- User Management Section --- */} 
             <Card title="用户管理">
-                <div className="flex justify-start mb-fluent-md">
+                <div className="flex justify-start mb-4">
                     <FluentButton 
                         variant={isAddingUser ? 'secondary' : 'primary'}
                         icon={<LuPlus />} 
@@ -313,8 +303,8 @@ function UserManagementPage() {
 
                 {/* Add User Form */} 
                 {isAddingUser && (
-                    <div className="p-fluent-lg border border-neutral-stroke rounded-fluent-md bg-neutral-background mb-fluent-lg space-y-fluent-md">
-                        <h3 className="text-md font-semibold text-neutral-foreground mb-4">添加新用户</h3>
+                    <div className="border border-yellow-400 rounded-md p-4 bg-gradient-to-r from-yellow-50 to-yellow-100 space-y-4 mb-6">
+                        <h5 className="text-md font-semibold text-yellow-700 mb-4">添加新用户</h5>
                         {addUserError && (
                            <AlertMessage type="error" message={addUserError} className="text-xs mb-4" />
                         )}
@@ -327,7 +317,6 @@ function UserManagementPage() {
                                 onChange={(e) => setNewUsername(e.target.value)}
                                 required
                                 disabled={addUserLoading}
-                                className="border border-neutral-stroke rounded-fluent-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
                             />
                             <FluentInput 
                                 label="密码:"
@@ -338,7 +327,6 @@ function UserManagementPage() {
                                 required
                                 minLength={6}
                                 disabled={addUserLoading}
-                                className="border border-neutral-stroke rounded-fluent-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
                             />
                             <FluentSelect 
                                 label="角色:"
@@ -348,9 +336,8 @@ function UserManagementPage() {
                                 options={roleOptions}
                                 required
                                 disabled={addUserLoading || rolesForUserLoading}
-                                className="border border-neutral-stroke rounded-fluent-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
                             />
-                            <div className="flex justify-end space-x-4 pt-4">
+                            <div className="flex justify-end space-x-4">
                                 <FluentButton type="button" variant="secondary" onClick={() => setIsAddingUser(false)} disabled={addUserLoading}>
                                     取消
                                 </FluentButton>
@@ -359,7 +346,7 @@ function UserManagementPage() {
                                     variant="primary" 
                                     disabled={addUserLoading || rolesForUserLoading}
                                     icon={<LuSave />} 
-                                    className="!bg-blue-600 !text-white font-bold shadow-none hover:shadow-md"
+                                    className={`${(addUserLoading || rolesForUserLoading) ? '!bg-gray-200 !text-gray-600' : '!bg-yellow-500 !text-white hover:!bg-yellow-600'}`}
                                 >
                                     {addUserLoading ? '添加中...' : '确认添加'}
                                 </FluentButton>
@@ -403,8 +390,8 @@ function UserManagementPage() {
             </Card>
 
             {/* --- Role & Permission Management Section --- */} 
-            <Card title="角色与权限管理" className="mt-16">
-                <div className="flex justify-start mb-fluent-md">
+            <Card title="角色管理" className="mt-16">
+                <div className="flex justify-start mb-4">
                     <FluentButton 
                         variant={isAddingRole ? 'secondary' : 'primary'} 
                         icon={<LuPlus />} 
@@ -418,8 +405,8 @@ function UserManagementPage() {
 
                 {/* Add Role Form */} 
                  {isAddingRole && (
-                    <div className="p-fluent-lg border border-neutral-stroke rounded-fluent-md bg-neutral-background mb-fluent-lg space-y-fluent-md">
-                        <h3 className="text-md font-semibold text-neutral-foreground mb-4">添加新角色</h3>
+                    <div className="border border-yellow-400 rounded-md p-4 bg-gradient-to-r from-yellow-50 to-yellow-100 space-y-4 mb-6">
+                        <h5 className="text-md font-semibold text-yellow-700 mb-4">添加新角色</h5>
                         {addRoleError && (
                             <AlertMessage type="error" message={addRoleError} className="text-xs mb-4" />
                         )}
@@ -441,11 +428,16 @@ function UserManagementPage() {
                                 onChange={(e) => setNewRoleDescription(e.target.value)}
                                 disabled={addRoleLoading}
                              />
-                            <div className="flex justify-end space-x-4 pt-4">
+                            <div className="flex justify-end space-x-4">
                                 <FluentButton type="button" variant="secondary" onClick={() => setIsAddingRole(false)} disabled={addRoleLoading}>
                                     取消
                                 </FluentButton>
-                                <FluentButton type="submit" variant="primary" disabled={addRoleLoading} className="!bg-blue-600 !text-white font-bold">
+                                <FluentButton 
+                                    type="submit" 
+                                    variant="primary" 
+                                    disabled={addRoleLoading} 
+                                    className={`${addRoleLoading ? '!bg-gray-200 !text-gray-600' : '!bg-yellow-500 !text-white hover:!bg-yellow-600'}`}
+                                >
                                     {addRoleLoading ? '添加中...' : '确认添加'}
                                 </FluentButton>
                             </div>
@@ -549,7 +541,7 @@ function UserManagementPage() {
                             )}
                         </form>
                          {/* Modal Footer */} 
-                        <div className="p-fluent-md bg-neutral-background flex justify-end space-x-fluent-sm mt-auto">
+                        <div className="p-fluent-md pt-4 bg-neutral-background flex justify-end space-x-4 mt-auto">
                              <FluentButton type="button" variant="secondary" onClick={closeEditPermissionsModal} disabled={assigningPermissionsLoading}>
                                 取消
                             </FluentButton>

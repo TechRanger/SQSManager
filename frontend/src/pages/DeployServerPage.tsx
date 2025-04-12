@@ -3,7 +3,6 @@ import { useNavigate, Link } from 'react-router-dom';
 import { DeployInstanceDto } from '../types/deploy-instance.dto';
 // Import shared UI components
 import FluentInput from '../components/ui/FluentInput';
-import FluentTextarea from '../components/ui/FluentTextarea';
 import FluentButton from '../components/ui/FluentButton';
 import Card from '../components/ui/Card'; // Use Card for structure
 import { useAuth } from '../context/AuthContext'; // 引入 Auth Context
@@ -31,14 +30,6 @@ function DeployServerPage() {
     const [outputLog, setOutputLog] = useState<string[]>([]);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const eventSourceRef = useRef<EventSource | null>(null);
-
-    // Store initial default values for resetting ports
-    const initialPorts = useRef({
-        gamePort: 7787,
-        queryPort: 27165,
-        rconPort: 21114,
-        beaconPort: 15000,
-    });
 
     // Add ref for the log container element
     const logContainerRef = useRef<HTMLPreElement>(null);
@@ -138,7 +129,7 @@ function DeployServerPage() {
              };
 
             // 使用更安全的方式获取SSE URL
-            const sseUrl = getDeployUrl(deployDto);
+            const sseUrl = getDeployUrl();
             
             // 使用POST请求创建一个新的部署任务并获取任务ID
             const headers = new Headers();
@@ -336,7 +327,7 @@ function DeployServerPage() {
                         />
 
                         {/* Submit Button */}
-                        <div className="pt-6 mt-2 border-t border-neutral-stroke flex justify-end">
+                        <div className="flex justify-center">
                              <FluentButton 
                                 type="submit" 
                                 variant="primary"

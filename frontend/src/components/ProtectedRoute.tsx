@@ -4,10 +4,11 @@ import { useAuth } from '../context/AuthContext';
 
 interface ProtectedRouteProps {
     children: ReactNode;
+    requiredPermission?: string;
 }
 
-const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
-    const { isLoggedIn, isLoading } = useAuth();
+const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredPermission }) => {
+    const { isLoggedIn, isLoading, hasPermission } = useAuth();
     const location = useLocation();
 
     if (isLoading) {
@@ -21,6 +22,11 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
         // along to that page after they login, which is a nicer user experience
         // than dropping them off on the home page.
         return <Navigate to="/login" state={{ from: location }} replace />;
+    }
+
+    // 如果设置了权限要求，但用户没有该权限
+    if (requiredPermission && !hasPermission(requiredPermission)) {
+        return <Navigate to="/" replace />;
     }
 
     return <>{children}</>; // Render the children if logged in

@@ -237,8 +237,7 @@ const AdminConfigManager: React.FC<AdminConfigManagerProps> = ({
         
         return (
             <section>
-                <div className="flex justify-between items-center mb-fluent-md">
-                    <h4 className="text-lg font-semibold text-neutral-foreground">权限组</h4>
+                <div className="flex mb-fluent-md items-center mb-4">
                     <FluentButton 
                         variant={isAddingGroup ? 'secondary' : 'primary'} 
                         onClick={() => { setIsAddingGroup(prev => !prev); setAddGroupError(null); }} 
@@ -249,11 +248,12 @@ const AdminConfigManager: React.FC<AdminConfigManagerProps> = ({
                     >
                         {isAddingGroup ? '取消添加' : '添加权限组'}
                     </FluentButton>
+                    <span className="ml-4 text-md font-medium text-neutral-foreground">当前权限组: {config.groups.length}个</span>
                 </div>
 
                 {/* Add Group Form */}
                 {isAddingGroup && (
-                    <form onSubmit={handleAddGroupSubmit} className="mb-fluent-2xl border border-brand rounded-md p-4 bg-gradient-to-r from-blue-50 to-blue-100 space-y-4">
+                    <form onSubmit={handleAddGroupSubmit} className="mb-fluent-2xl border border-brand rounded-md p-4 bg-gradient-to-r from-blue-50 to-blue-100 space-y-4 mb-6">
                         <h5 className="text-md font-semibold text-blue-700">添加新权限组</h5>
                         <FluentInput
                             name="newGroupName"
@@ -268,7 +268,7 @@ const AdminConfigManager: React.FC<AdminConfigManagerProps> = ({
                         
                         <div>
                             <label className="block text-sm font-medium text-neutral-secondary mb-2">权限:</label>
-                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 text-xs border border-neutral-stroke p-4 rounded-fluent-sm bg-white">
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 text-xs border border-gray-300 p-3 rounded-md bg-white">
                                 {AVAILABLE_PERMISSIONS.map(perm => (
                                     <label key={perm} className="flex items-center space-x-2 cursor-pointer">
                                         <input 
@@ -284,17 +284,7 @@ const AdminConfigManager: React.FC<AdminConfigManagerProps> = ({
                             </div>
                         </div>
                         
-                        {/* 添加调试输出 */}
-                        <div className="mt-2 text-xs text-gray-500">
-                            <details>
-                                <summary>调试信息 (仅供开发使用)</summary>
-                                <pre className="mt-1 bg-gray-100 p-2 rounded whitespace-pre-wrap">
-                                    {config.groups.map(g => `组: ${g.name}, 权限类型: ${typeof g.permissions}, 内容: ${JSON.stringify(g.permissions)}`).join('\n')}
-                                </pre>
-                            </details>
-                        </div>
-                        
-                        <div className="flex justify-end space-x-fluent-sm">
+                        <div className="flex justify-end space-x-4">
                             <FluentButton 
                                 type="button" 
                                 disabled={addGroupLoading} 
@@ -307,6 +297,7 @@ const AdminConfigManager: React.FC<AdminConfigManagerProps> = ({
                                 type="submit" 
                                 disabled={addGroupLoading || !newGroupName.trim() || newGroupPermissions.size === 0}
                                 variant="primary"
+                                className={`${(addGroupLoading || !newGroupName.trim() || newGroupPermissions.size === 0) ? '!bg-gray-200 !text-gray-600' : ''}`}
                             >
                                 {addGroupLoading ? '添加中...' : '添加组'}
                             </FluentButton>
@@ -321,13 +312,12 @@ const AdminConfigManager: React.FC<AdminConfigManagerProps> = ({
                 )}
 
                 {/* 显示当前组 */}
-                <div className="mt-fluent-md space-y-fluent-md">
-                    <h5 className="text-md font-medium text-neutral-foreground">当前权限组 ({config.groups.length})</h5>
+                <div className="mt-fluent-md space-y-4">
                     {config.groups.length === 0 ? (
                         <p className="text-sm text-gray-500 italic">暂无权限组定义。</p>
                     ) : (
                         config.groups.map(group => (
-                            <div key={group.name} className="border border-gray-200 rounded-md overflow-hidden">
+                            <div key={group.name} className="border border-gray-200 rounded-md overflow-hidden mb-4">
                                 <div className="bg-gray-50 p-3 border-b border-gray-200 flex justify-between items-center">
                                     <h6 className="font-bold text-neutral-foreground">{group.name}</h6>
                                     <FluentButton
@@ -381,8 +371,7 @@ const AdminConfigManager: React.FC<AdminConfigManagerProps> = ({
         
         return (
             <section>
-                <div className="flex justify-between items-center mb-fluent-md">
-                    <h4 className="text-lg font-semibold text-neutral-foreground">管理员分配</h4>
+                <div className="flex items-center mb-4">
                     <FluentButton 
                         variant={isAddingAdmin ? 'secondary' : 'primary'}
                         onClick={() => {
@@ -424,9 +413,18 @@ const AdminConfigManager: React.FC<AdminConfigManagerProps> = ({
                         isSteamIdInvalid,
                         finalDisabled: isButtonDisabled
                     });
+                    
+                    // 添加日志用于调试权限组下拉菜单禁用状态
+                    console.log('[AdminConfigManager] Permissions Group Select Disabled State:', {
+                        isDisabled: addAdminLoading || hasNoGroups,
+                        reason: { 
+                            addAdminLoading: addAdminLoading, 
+                            hasNoGroups: hasNoGroups 
+                        }
+                    });
 
                     return (
-                        <form onSubmit={handleAddAdminSubmit} className="mb-fluent-2xl border border-green-300 rounded-md p-4 bg-gradient-to-r from-green-50 to-green-100 space-y-4">
+                        <form onSubmit={handleAddAdminSubmit} className="mb-fluent-2xl border border-green-300 rounded-md p-4 bg-gradient-to-r from-green-50 to-green-100 space-y-4 mb-6">
                             <h5 className="text-md font-semibold text-green-700">添加新管理员</h5>
                             <FluentInput 
                                 label="Steam ID 64:"
@@ -463,7 +461,7 @@ const AdminConfigManager: React.FC<AdminConfigManagerProps> = ({
                                 placeholder="例如 玩家名称或备注"
                             />
                             
-                            <div className="flex justify-end space-x-fluent-sm">
+                            <div className="flex justify-end space-x-4">
                                 <FluentButton 
                                     type="button" 
                                     disabled={addAdminLoading} 
@@ -476,6 +474,7 @@ const AdminConfigManager: React.FC<AdminConfigManagerProps> = ({
                                     type="submit" 
                                     disabled={isButtonDisabled}
                                     variant="primary"
+                                    className={`${isButtonDisabled ? '!bg-gray-200 !text-gray-600' : ''}`}
                                 >
                                     {addAdminLoading ? '添加中...' : '添加管理员'}
                                 </FluentButton>
@@ -492,14 +491,14 @@ const AdminConfigManager: React.FC<AdminConfigManagerProps> = ({
                 })()}
 
                 {/* Admins By Group List */}
-                <div className="mt-fluent-md space-y-fluent-xl">
+                <div className="mt-fluent-md space-y-4">
                     {Object.keys(adminsByGroup).length === 0 ? (
                         <p className="text-sm text-gray-500 italic">暂无管理员分配。</p>
                     ) : (
                         Object.entries(adminsByGroup).map(([groupName, admins]) => (
                             <div key={groupName} className="border border-gray-200 rounded-md overflow-hidden">
                                 <div className="bg-gray-50 p-3 border-b border-gray-200">
-                                    <h6 className="font-bold text-neutral-foreground">组: {groupName} ({admins.length})</h6>
+                                    <h6 className="font-bold text-neutral-foreground">权限组：{groupName}</h6>
                                 </div>
                                 <div className="p-0">
                                     <FluentTable headers={["Steam ID", "注释", "操作"]}>

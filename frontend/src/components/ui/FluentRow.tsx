@@ -24,13 +24,14 @@ const FluentRow: React.FC<FluentRowProps> = ({ children, className, ...props }) 
     >
       {React.Children.map(children, (child, index) => {
         if (React.isValidElement(child)) {
-          return React.cloneElement(child, {
+          // 使用类型断言告诉TypeScript我们知道这个元素有className属性
+          return React.cloneElement(child as React.ReactElement<any>, {
             className: `
               px-4 
               py-3.5
               ${index === 0 ? 'rounded-l-md' : ''} 
               ${index === React.Children.count(children) - 1 ? 'rounded-r-md' : ''}
-              ${child.props.className || ''}
+              ${(child as any).props.className || ''}
             `
           });
         }

@@ -123,7 +123,7 @@ export const deleteUser = (userId: number): Promise<void> => apiClient.delete(`/
 export const installServer = (installPath: string) => apiClient.post('/deployment/install', { installPath });
 
 // 添加部署服务器实例的API接口
-export const getDeployUrl = (deployData: any) => {
+export const getDeployUrl = () => {
   return `${baseURL}/deployment/deploy-instance-sse`;
 };
 

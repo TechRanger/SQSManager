@@ -1,5 +1,5 @@
 {
   "allowedPublicIp": null,
   "accessMode": "open",
-  "serverPublicAddress": "http://0.0.0.0:5173"
+  "serverPublicAddress": null
 }

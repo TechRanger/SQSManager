@@ -36,7 +36,7 @@ export class SeedService implements OnModuleInit {
             'server:manage_admins_web', // Added missing admin management permission
             'server:manage_plugins', // 添加插件管理权限
             'game_session:view', // 添加对局管理查看权限
-            'user:view', 'user:create', 'user:delete', 'user:assign_role',
+            'user:view', 'user:create', 'user:delete', 'user:assign_role', 'user:manage',
             'role:view', 'role:create', 'role:delete', 'role:assign_permissions'
         ]; // Add the missing closing bracket
 

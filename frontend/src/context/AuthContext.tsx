@@ -114,11 +114,24 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const hasPermission = useCallback((permissions: string | string[]): boolean => {
         if (!user?.permissions) return false;
         
+        // 检查是否有user:manage权限(包含所有user:*权限)
+        const hasUserManage = user.permissions.includes('user:manage');
+        
         if (typeof permissions === 'string') {
+            // 如果请求的是user:开头的权限且用户有user:manage权限,直接返回true
+            if (hasUserManage && permissions.startsWith('user:')) {
+                return true;
+            }
             return user.permissions.includes(permissions);
         }
         
-        return permissions.every(permission => user.permissions.includes(permission));
+        return permissions.every(permission => {
+            // 如果请求的是user:开头的权限且用户有user:manage权限,直接返回true
+            if (hasUserManage && permission.startsWith('user:')) {
+                return true;
+            }
+            return user.permissions.includes(permission);
+        });
     }, [user]);
 
     // Use useMemo to prevent unnecessary re-renders

@@ -9,7 +9,7 @@ import AlertMessage from '../components/ui/AlertMessage'; // Import AlertMessage
 import { LuSave } from 'react-icons/lu'; // Import icon
 
 function UserSettingsPage() {
-    const { user } = useAuth();
+    const { } = useAuth();
     const [currentPassword, setCurrentPassword] = useState('');
     const [newPassword, setNewPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');

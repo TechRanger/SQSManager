@@ -22,6 +22,7 @@ export type PermissionName =
   | 'user:create'           // Create new users
   | 'user:delete'           // Delete users
   | 'user:assign_role'      // Change a user's assigned role
+  | 'user:manage'           // All user management permissions
   // Role & Permission Management
   | 'role:view'             // View list of roles and their permissions
   | 'role:create'           // Create new roles
