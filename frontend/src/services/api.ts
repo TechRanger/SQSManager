@@ -10,10 +10,16 @@ import { Permission } from '../types/permission'; // Import Permission type
 import { CreateRoleDto } from '../types/create-role.dto'; // Import CreateRoleDto type
 
 // Dynamically set the API base URL based on the hostname the frontend is accessed from
-// Assumes the backend runs on the same host but on port 3000
-const backendPort = 3000;
+// 根据不同环境设置API基础URL
 const apiPath = '/api';
-const baseURL = `${window.location.protocol}//${window.location.hostname}:${backendPort}${apiPath}`;
+
+// 判断是开发环境还是生产环境
+// 在开发环境中(localhost:5173)，使用完整URL连接到后端(localhost:3000)
+// 在生产环境中，使用相对路径让Nginx处理代理
+const isDevEnvironment = window.location.port === '5173';
+const baseURL = isDevEnvironment 
+  ? `${window.location.protocol}//${window.location.hostname}:3000${apiPath}`
+  : apiPath;
 
 console.log(`API Base URL set to: ${baseURL}`); // Add log for debugging
 
@@ -22,6 +28,7 @@ const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  withCredentials: true, // 允许跨域请求携带凭证
 });
 
 // --- Axios Request Interceptor --- 

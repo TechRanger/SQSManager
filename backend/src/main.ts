@@ -14,25 +14,18 @@ async function bootstrap() {
 
   // More specific CORS configuration
   app.enableCors({
-    origin: function (origin, callback) {
-      // Allow requests with no origin (like mobile apps or curl requests)
-      // or requests from the specific frontend origin
-      const allowedOrigins = ['http://localhost:5173', 'http://14.145.201.127:5173']; // Add both localhost and your IP
-      if (!origin || allowedOrigins.indexOf(origin) !== -1) {
-        callback(null, true);
-      } else {
-        logger.warn(`CORS: Blocked origin ${origin}`);
-        callback(new Error('Not allowed by CORS'));
-      }
+    origin: function(origin, callback) {
+      // 允许任何来源，包括直接通过IP地址访问
+      callback(null, true);
     },
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
-    allowedHeaders: 'Content-Type, Accept, Authorization', // Ensure Authorization header is allowed
+    allowedHeaders: 'Content-Type, Accept, Authorization',
     credentials: true,
   });
 
   // 监听端口
   const port = process.env.PORT || 3000;
-  await app.listen(port);
+  await app.listen(port, '0.0.0.0'); // 监听所有网络接口
   logger.log(`后端服务正在监听 http://localhost:${port}`);
 }
 bootstrap();

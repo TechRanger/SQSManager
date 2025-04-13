@@ -1,0 +1,17 @@
+# .gitattributes
+
+# 强制所有文本文件在检出时转换为本地行尾符，但在提交时转换为 LF
+* text=auto
+
+# 明确强制特定文件在仓库中始终使用 LF
+docker-compose.yml text eol=lf
+*.sh             text eol=lf
+*.js             text eol=lf
+*.ts             text eol=lf
+*.json           text eol=lf
+*.md             text eol=lf
+
+# ... 为其他需要确保 LF 的文件类型添加规则
+# 对于二进制文件，防止 Git 转换它们
+# *.png binary
+# *.jpg binary

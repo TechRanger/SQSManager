@@ -11,7 +11,8 @@ import { Server, Socket } from 'socket.io';
 
 @WebSocketGateway({
   cors: {
-    origin: '*', // Adjust for production environment
+    origin: true, // 改为允许所有来源，并支持凭证
+    credentials: true
   },
   namespace: '/realtime', // Use a namespace for separation
 })

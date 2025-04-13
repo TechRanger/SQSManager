@@ -1,0 +1,47 @@
+services:
+  # 后端服务
+  backend:
+    image: ${DOCKER_REGISTRY:-michael0807}/backend:${TAG:-latest}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: always
+    user: "root" # 强制以 root 用户运行容器
+    environment:
+      - NODE_ENV=production
+      - JWT_SECRET=${JWT_SECRET:-changeThisInProductionEnvironment}
+      - JWT_EXPIRATION=${JWT_EXPIRATION:-86400}
+    ports:
+      - "3000:3000"  # 暴露后端端口，允许直接访问后端API
+    volumes:
+      - backend_data:/app/data  # 挂载命名卷用于持久化应用内部数据
+      - /opt/sqservers:/servers # 挂载宿主机的 /opt/sqservers 到容器的 /servers (需要确保root有权访问)
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+  
+  # 前端服务
+  frontend:
+    image: ${DOCKER_REGISTRY:-michael0807}/frontend:${TAG:-latest}
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      - "${PORT:-80}:80"
+    networks:
+      - app_network
+    depends_on:
+      - backend
+
+networks:
+  app_network:
+    driver: bridge
+
+volumes:
+  backend_data:
+    driver: local 

@@ -1,0 +1,25 @@
+# 对所有文件生效的顶级配置
+root = true
+
+[*]
+indent_style = space
+indent_size = 2
+end_of_line = lf  # 默认所有文件使用 LF
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+# 对 YAML 文件特别指定
+[*.{yml,yaml}]
+end_of_line = lf
+indent_size = 2
+
+# 对 Shell 脚本特别指定 (确保是 LF)
+[*.sh]
+end_of_line = lf
+
+# 可以为其他文件类型添加规则
+# [*.js]
+# end_of_line = lf
+# [*.ts]
+# end_of_line = lf
