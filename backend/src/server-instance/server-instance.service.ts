@@ -1408,19 +1408,29 @@ Port=21114`; // Add a default port too
         this.logger.log(`服务器 ${id}: 开始使用 steamcmd (${steamCmdPath}) 更新，安装目录: ${installPath}`);
         this.realtimeGateway.sendUpdateLog(updateRoom, `服务器 ${id}: 开始使用 steamcmd (${steamCmdPath}) 更新，安装目录: ${installPath}`);
 
+        // Use standard arguments without extra quotes for the directory
+        // Ensure +force_install_dir comes before +login
         const steamCmdArgs = [
-            `+force_install_dir`, `"${installPath}"`,
             `+login`, `anonymous`,
+            `+force_install_dir`, installPath, // Moved before login
             `+app_update`, this.SQUAD_APP_ID, `validate`,
             `+quit`
         ];
 
         try {
-            // Use the provided steamCmdPath in spawn
-            const updateProcess = spawn(steamCmdPath, steamCmdArgs, {
-                shell: true, 
-                stdio: ['ignore', 'pipe', 'pipe'] 
-            });
+            // 设置 SteamCMD 进程的选项
+            const spawnOptions: any = {
+                stdio: ['ignore', 'pipe', 'pipe'],
+                env: { ...process.env } // Start by inheriting current env
+            };
+
+            // Conditionally add HOME env only on non-Windows platforms
+            if (process.platform !== 'win32') {
+                spawnOptions.env.HOME = '/home/steam';
+            }
+
+            // 启动 SteamCMD 进程
+            const updateProcess = spawn(steamCmdPath, steamCmdArgs, spawnOptions);
 
             updateProcess.stdout.on('data', (data) => {
                 const line = data.toString().trim();

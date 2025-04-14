@@ -130,7 +130,7 @@ echo "4) 查看日志"
 echo "5) 备份数据"
 echo "6) 重置管理员密码"
 echo "7) 退出"
-read -p "请输入选项 [1-7]: " choice
+read -p "请输入选项 [1-7]: " choice < /dev/tty
 
 case $choice in
     1)

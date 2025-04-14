@@ -52,10 +52,10 @@ export class DeploymentService {
             return envPath;
         }
 
-        // 2. Fallback to default command name based on OS
-        this.logger.warn('未设置 STEAMCMD_PATH 环境变量，将尝试使用默认命令 (steamcmd.exe / steamcmd)。');
-        const isWindows = process.platform === 'win32';
-        return isWindows ? 'steamcmd.exe' : 'steamcmd';
+        // 2. Fallback to the correct path inside the cm2network/steamcmd image
+        const defaultSteamCmdPath = '/home/steam/steamcmd/steamcmd.sh';
+        this.logger.warn(`未设置 STEAMCMD_PATH 环境变量或未提供自定义路径，将回退到默认路径: ${defaultSteamCmdPath}`);
+        return defaultSteamCmdPath;
     }
 
     // --- Main Installation Logic ---
@@ -80,11 +80,12 @@ export class DeploymentService {
         const steamCmdExecutable = this.getSteamCmdPath();
         const squadAppId = '403240'; // Squad Dedicated Server App ID
 
+        // Adjust argument order according to recommendations
         const args = [
-            '+force_install_dir', installPath,
             '+login', 'anonymous',
+            '+force_install_dir', installPath,
             '+app_update', squadAppId, 'validate',
-            '+quit'
+            '+quit',
         ];
 
         this.logger.log(`执行 SteamCMD: ${steamCmdExecutable} ${args.join(' ')}`);
@@ -224,9 +225,19 @@ export class DeploymentService {
             this.logger.log(`正在启动 SteamCMD: ${steamCmdPath} ${args.join(' ')}`);
             subject.next({ data: `正在启动 SteamCMD...` });
             
-            const steamCmdProcess = spawn(steamCmdPath, args, {
+            // 设置 SteamCMD 进程的选项
+            const spawnOptions: any = {
                 stdio: ['ignore', 'pipe', 'pipe'], // Capture stdout/stderr
-            });
+                env: { ...process.env } // Start by inheriting current env
+            };
+
+            // Conditionally add HOME env only on non-Windows platforms
+            if (process.platform !== 'win32') {
+                spawnOptions.env.HOME = '/home/steam';
+            }
+            
+            // 启动 SteamCMD 进程
+            const steamCmdProcess = spawn(steamCmdPath, args, spawnOptions);
 
             // Helper to send data
             const sendData = (data: Buffer | string) => {
