@@ -6,7 +6,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: always
-    user: "root" # 强制以 root 用户运行容器
+    # user: "1000:1000" # Let the container start as root initially
     environment:
       - NODE_ENV=production
       - JWT_SECRET=${JWT_SECRET:-changeThisInProductionEnvironment}
@@ -15,7 +15,7 @@ services:
       - "3000:3000"  # 暴露后端端口，允许直接访问后端API
     volumes:
       - backend_data:/app/data  # 挂载命名卷用于持久化应用内部数据
-      - /opt/sqservers:/servers # 挂载宿主机的 /opt/sqservers 到容器的 /servers (需要确保root有权访问)
+      - /home/sqsmanager/servers:/s
     networks:
       - app_network
     healthcheck:

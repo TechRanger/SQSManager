@@ -23,6 +23,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
 # 验证 Node.js 和 npm 版本 (可选)
 RUN node -v && npm -v
 
+# 安装 gosu 用于权限切换
+RUN apt-get update && apt-get install -y --no-install-recommends gosu && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# 验证 gosu 安装 (可选)
+RUN gosu --version
+
 # 复制 package.json 和 package-lock.json
 COPY package*.json ./
 
@@ -37,6 +44,11 @@ COPY . .
 # 如果没有构建步骤，可以注释掉或删除这一行
 RUN npm run build
 
+# 复制并设置 entrypoint 脚本
+COPY entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/entrypoint.sh
+ENTRYPOINT ["entrypoint.sh"]
+
 # 确保 /app 目录的所有权正确 (如果后续可能切换用户)
 # RUN chown -R steam:steam /app 
 
@@ -50,6 +62,5 @@ ENV NODE_ENV production
 # 暴露应用端口
 EXPOSE 3000
 
-# 运行应用
-# 注意: CMD 应该指向你编译后的 JavaScript 文件入口，通常在 dist 目录
+# 运行应用 (会作为参数传递给 entrypoint.sh)
 CMD [ "node", "dist/main" ] 

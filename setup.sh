@@ -79,7 +79,65 @@ else
     echo -e "${GREEN}Docker Compose 已安装${NC}"
 fi
 
-# 创建项目目录
+# --- 创建专门的用户和服务器数据目录 ---
+SQS_USER="sqsmanager"
+SQS_SERVERS_DIR="/home/$SQS_USER/servers"
+
+echo -e "${YELLOW}检查/创建 SQSManager 用户和目录...${NC}"
+
+# 检查用户是否存在，不存在则创建 (使用 useradd，避免交互)
+if ! id -u $SQS_USER &>/dev/null; then
+    echo -e "创建用户 $SQS_USER..."
+    useradd -m -s /bin/bash $SQS_USER || {
+        echo -e "${RED}创建用户 $SQS_USER 失败${NC}"
+        exit 1
+    }
+    echo -e "${GREEN}用户 $SQS_USER 已创建${NC}"
+else
+    echo -e "${GREEN}用户 $SQS_USER 已存在${NC}"
+fi
+
+# 创建服务器目录
+echo -e "创建服务器目录 $SQS_SERVERS_DIR..."
+mkdir -p $SQS_SERVERS_DIR || {
+    echo -e "${RED}创建目录 $SQS_SERVERS_DIR 失败${NC}"
+    exit 1
+}
+
+# 设置目录权限 (所有者: 1000, 组: 1000, 权限: 755 - 对应容器内 steam 用户)
+echo -e "设置目录 $SQS_SERVERS_DIR 权限..."
+chown 1000:1000 $SQS_SERVERS_DIR || {
+    echo -e "${RED}设置 $SQS_SERVERS_DIR 所有者/组失败${NC}"
+    exit 1
+}
+chmod 755 $SQS_SERVERS_DIR || {
+    echo -e "${RED}设置 $SQS_SERVERS_DIR 权限失败${NC}"
+    exit 1
+}
+# 同时设置父目录 /home/sqsmanager 的权限
+PARENT_DIR=$(dirname "$SQS_SERVERS_DIR")
+echo -e "设置父目录 $PARENT_DIR 权限..."
+chown 1000:1000 $PARENT_DIR || {
+    echo -e "${RED}设置 $PARENT_DIR 所有者/组失败${NC}"
+    exit 1
+}
+chmod 755 $PARENT_DIR || {
+    echo -e "${RED}设置 $PARENT_DIR 权限失败${NC}"
+    exit 1
+}
+
+# 检查 steam 用户是否存在，如果存在则添加到 sqsmanager 组 (已禁用)
+# echo -e "${YELLOW}检查 steam 用户并尝试添加到 sqsmanager 组...${NC}"
+# if id -u steam &>/dev/null; then
+#     usermod -aG $SQS_USER steam && echo -e "${GREEN}用户 steam 已添加到组 $SQS_USER ${NC}" || echo -e "${RED}将用户 steam 添加到组 $SQS_USER 失败（可能已在组中）${NC}"
+# else
+#     echo -e "${YELLOW}用户 steam 不存在，跳过添加到组${NC}"
+# fi
+
+echo -e "${GREEN}用户和目录设置完成${NC}"
+# --- 用户和目录设置结束 ---
+
+# 创建项目目录 (仍然使用 /opt/sqsmanager 存放应用配置文件和脚本)
 INSTALL_DIR="/opt/sqsmanager"
 mkdir -p $INSTALL_DIR
 cd $INSTALL_DIR
@@ -91,6 +149,25 @@ curl -L "https://bitbucket.org/michaelcode/sqsmanager/downloads/docker-compose.y
     echo -e "${RED}下载 docker-compose.yml 失败${NC}"
     exit 1
 }
+
+# --- 修改 docker-compose.yml 中的挂载路径 (已禁用) --- 
+# COMPOSE_FILE="$INSTALL_DIR/docker-compose.yml"
+# echo -e "${YELLOW}修改 $COMPOSE_FILE 中的服务器挂载路径...${NC}"
+# # 使用 sed 将包含 /servers: 的行中的宿主机路径替换为新的路径
+# # 注意: sed 的 -i 参数直接修改文件，需要确保匹配正确
+# # 这个正则表达式查找以空白开头，然后是 - /任意字符:/servers 开头的行，并替换 /任意字符: 部分
+# sed -i -E "s|^(\s*-\s*)([^:]+)(:/servers.*)|\1$SQS_SERVERS_DIR\3|" "$COMPOSE_FILE" || {
+#     echo -e "${RED}使用 sed 修改 $COMPOSE_FILE 失败${NC}"
+#     exit 1
+# }
+# # 验证一下修改是否成功 (可选)
+# if grep -q "$SQS_SERVERS_DIR:/servers" "$COMPOSE_FILE"; then
+#     echo -e "${GREEN}$COMPOSE_FILE 挂载路径已更新为 $SQS_SERVERS_DIR${NC}"
+# else
+#     echo -e "${RED}警告: 未能在 $COMPOSE_FILE 中找到更新后的挂载路径，请手动检查${NC}"
+#     # 可以选择在这里退出，或者继续执行
+# fi
+# --- 挂载路径修改结束 (已禁用) ---
 
 # 检查是否已有 .env 文件，如没有则创建
 if [ ! -f "$INSTALL_DIR/.env" ]; then

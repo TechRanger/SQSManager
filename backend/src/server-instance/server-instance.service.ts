@@ -96,7 +96,7 @@ export class ServerInstanceService implements OnModuleDestroy, OnModuleInit {
 
     private getServerExecutablePath(instance: ServerInstance): string {
         const isWindows = process.platform === 'win32';
-        const serverExecutable = isWindows ? 'SquadGameServer.exe' : 'SquadGameServer.sh';
+        const serverExecutable = isWindows ? 'SquadGameServer.exe' : 'SquadGameServer';
         // Common structure: <InstallDir>/SquadGame/Binaries/<Platform>/<Executable>
         return path.join(
             instance.installPath,

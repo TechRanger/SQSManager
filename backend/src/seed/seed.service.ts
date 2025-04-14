@@ -32,13 +32,13 @@ export class SeedService implements OnModuleInit {
         const definedPermissions: PermissionName[] = [
             'deployment:manage',
             'server:view_all', 'server:view_details', 'server:edit_config', 'server:delete',
-            'server:control', 'server:rcon', 'server:manage_bans_web',
+            'server:control', 'server:update', 'server:rcon', 'server:manage_bans_web',
             'server:manage_admins_web', // Added missing admin management permission
             'server:manage_plugins', // 添加插件管理权限
             'game_session:view', // 添加对局管理查看权限
             'user:view', 'user:create', 'user:delete', 'user:assign_role', 'user:manage',
             'role:view', 'role:create', 'role:delete', 'role:assign_permissions'
-        ]; // Add the missing closing bracket
+        ]; // Closing bracket was already correct
 
         const existingPermissions = await this.permissionRepository.find();
         const existingPermissionNames = new Set(existingPermissions.map(p => p.name));
