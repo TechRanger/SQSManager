@@ -30,7 +30,7 @@ export class ServerInstanceService implements OnModuleDestroy, OnModuleInit {
     private readonly logger = new Logger(ServerInstanceService.name);
     // Use the defined type for the map
     private runningServers: Map<number, RunningServerInfo> = new Map();
-    private readonly SQUAD_APP_ID = '393380'; // Squad Dedicated Server App ID
+    private readonly SQUAD_APP_ID = '403240'; // Squad Dedicated Server App ID
     private activeUpdates: Set<number> = new Set(); // Track active updates
 
     constructor(
@@ -1404,6 +1404,22 @@ Port=21114`; // Add a default port too
         const installPath = instance.installPath;
         const updateRoom = `update-${id}`;
 
+        // 检查SteamCMD路径
+        try {
+            const fs = require('fs');
+            if (!fs.existsSync(steamCmdPath)) {
+                this.logger.error(`SteamCMD路径不存在: ${steamCmdPath}`);
+                this.realtimeGateway.sendUpdateError(updateRoom, `SteamCMD路径不存在: ${steamCmdPath}`);
+                this.activeUpdates.delete(id);
+                return;
+            }
+        } catch (error: any) {
+            this.logger.error(`检查SteamCMD路径时出错: ${error.message}`);
+            this.realtimeGateway.sendUpdateError(updateRoom, `检查SteamCMD路径时出错: ${error.message}`);
+            this.activeUpdates.delete(id);
+            return;
+        }
+
         // Use the provided steamCmdPath
         this.logger.log(`服务器 ${id}: 开始使用 steamcmd (${steamCmdPath}) 更新，安装目录: ${installPath}`);
         this.realtimeGateway.sendUpdateLog(updateRoom, `服务器 ${id}: 开始使用 steamcmd (${steamCmdPath}) 更新，安装目录: ${installPath}`);
@@ -1411,8 +1427,8 @@ Port=21114`; // Add a default port too
         // Use standard arguments without extra quotes for the directory
         // Ensure +force_install_dir comes before +login
         const steamCmdArgs = [
+            `+force_install_dir`, installPath, // Force install dir should come first
             `+login`, `anonymous`,
-            `+force_install_dir`, installPath, // Moved before login
             `+app_update`, this.SQUAD_APP_ID, `validate`,
             `+quit`
         ];
@@ -1427,6 +1443,9 @@ Port=21114`; // Add a default port too
             // Conditionally add HOME env only on non-Windows platforms
             if (process.platform !== 'win32') {
                 spawnOptions.env.HOME = '/home/steam';
+                this.realtimeGateway.sendUpdateLog(updateRoom, `检测到Linux/Unix平台，设置HOME环境变量为/home/steam`);
+            } else {
+                this.realtimeGateway.sendUpdateLog(updateRoom, `检测到Windows平台`);
             }
 
             // 启动 SteamCMD 进程
@@ -1437,6 +1456,11 @@ Port=21114`; // Add a default port too
                 if (line) {
                     this.logger.debug(`[SteamCMD Update ${id} STDOUT]: ${line}`);
                     this.realtimeGateway.sendUpdateLog(updateRoom, line);
+
+                    // 检测平台错误
+                    if (line.includes('invalidplatform')) {
+                        this.realtimeGateway.sendUpdateError(updateRoom, `SteamCMD平台错误: 当前SteamCMD版本与您的系统不兼容，请下载正确的SteamCMD版本`);
+                    }
                 }
             });
 
@@ -1465,7 +1489,7 @@ Port=21114`; // Add a default port too
                 }
             });
 
-        } catch (error) {
+        } catch (error: any) {
             this.activeUpdates.delete(id); // Ensure removal on synchronous errors too
             this.logger.error(`执行 steamcmd 更新时捕获到意外错误 (服务器 ${id}): ${error}`);
             this.realtimeGateway.sendUpdateError(updateRoom, `执行更新时发生意外错误: ${error.message}`);

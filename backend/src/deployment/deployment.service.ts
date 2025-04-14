@@ -29,6 +29,7 @@ export class DeploymentService {
     private readonly logger = new Logger(DeploymentService.name);
     private isDeploying: boolean = false; // Simple lock to prevent concurrent deployments
     private deploymentTasks: Map<string, DeploymentTask> = new Map(); // 存储部署任务
+    private readonly SQUAD_APP_ID = '403240'; // Squad Dedicated Server App ID - 与ServerInstanceService保持一致
 
     // Inject ConfigService and ServerInstanceService
     constructor(
@@ -78,7 +79,7 @@ export class DeploymentService {
         }
 
         const steamCmdExecutable = this.getSteamCmdPath();
-        const squadAppId = '403240'; // Squad Dedicated Server App ID
+        const squadAppId = this.SQUAD_APP_ID; // 使用常量
 
         // Adjust argument order according to recommendations
         const args = [
@@ -195,7 +196,7 @@ export class DeploymentService {
         const subject = task.subject;
         const steamCmdPath = this.getSteamCmdPath(dto.steamCmdPath); // 使用用户提供的SteamCMD路径
         const installPath = path.resolve(dto.installPath); // Resolve to absolute path
-        const squadAppId = '403240';
+        const squadAppId = this.SQUAD_APP_ID; // 使用常量
 
         this.logger.log(`开始执行部署任务: ${task.id} - ${installPath}`);
         this.logger.log(`使用SteamCMD路径: ${steamCmdPath}`);
@@ -217,7 +218,7 @@ export class DeploymentService {
         const args = [
             '+force_install_dir', installPath,
             '+login', 'anonymous',
-            '+app_update', squadAppId, 'validate',
+            '+app_update', this.SQUAD_APP_ID, 'validate', // 使用常量
             '+quit',
         ];
 
@@ -316,7 +317,7 @@ export class DeploymentService {
         const subject = new Subject<MessageEvent>();
         const steamCmdPath = this.getSteamCmdPath(dto.steamCmdPath);
         const installPath = path.resolve(dto.installPath); // Resolve to absolute path
-        const squadAppId = '403240';
+        const squadAppId = this.SQUAD_APP_ID; // 使用常量
 
         this.logger.log(`收到部署请求: ${JSON.stringify(dto)}`);
         this.logger.log(`使用SteamCMD路径: ${steamCmdPath}`);
@@ -335,7 +336,7 @@ export class DeploymentService {
         const args = [
             '+force_install_dir', installPath,
             '+login', 'anonymous',
-            '+app_update', squadAppId, 'validate',
+            '+app_update', this.SQUAD_APP_ID, 'validate', // 使用常量
             '+quit',
         ];
 

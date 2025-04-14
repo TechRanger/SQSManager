@@ -126,14 +126,6 @@ chmod 755 $PARENT_DIR || {
     exit 1
 }
 
-# 检查 steam 用户是否存在，如果存在则添加到 sqsmanager 组 (已禁用)
-# echo -e "${YELLOW}检查 steam 用户并尝试添加到 sqsmanager 组...${NC}"
-# if id -u steam &>/dev/null; then
-#     usermod -aG $SQS_USER steam && echo -e "${GREEN}用户 steam 已添加到组 $SQS_USER ${NC}" || echo -e "${RED}将用户 steam 添加到组 $SQS_USER 失败（可能已在组中）${NC}"
-# else
-#     echo -e "${YELLOW}用户 steam 不存在，跳过添加到组${NC}"
-# fi
-
 echo -e "${GREEN}用户和目录设置完成${NC}"
 # --- 用户和目录设置结束 ---
 
@@ -150,24 +142,13 @@ curl -L "https://bitbucket.org/michaelcode/sqsmanager/downloads/docker-compose.y
     exit 1
 }
 
-# --- 修改 docker-compose.yml 中的挂载路径 (已禁用) --- 
-# COMPOSE_FILE="$INSTALL_DIR/docker-compose.yml"
-# echo -e "${YELLOW}修改 $COMPOSE_FILE 中的服务器挂载路径...${NC}"
-# # 使用 sed 将包含 /servers: 的行中的宿主机路径替换为新的路径
-# # 注意: sed 的 -i 参数直接修改文件，需要确保匹配正确
-# # 这个正则表达式查找以空白开头，然后是 - /任意字符:/servers 开头的行，并替换 /任意字符: 部分
-# sed -i -E "s|^(\s*-\s*)([^:]+)(:/servers.*)|\1$SQS_SERVERS_DIR\3|" "$COMPOSE_FILE" || {
-#     echo -e "${RED}使用 sed 修改 $COMPOSE_FILE 失败${NC}"
-#     exit 1
-# }
-# # 验证一下修改是否成功 (可选)
-# if grep -q "$SQS_SERVERS_DIR:/servers" "$COMPOSE_FILE"; then
-#     echo -e "${GREEN}$COMPOSE_FILE 挂载路径已更新为 $SQS_SERVERS_DIR${NC}"
-# else
-#     echo -e "${RED}警告: 未能在 $COMPOSE_FILE 中找到更新后的挂载路径，请手动检查${NC}"
-#     # 可以选择在这里退出，或者继续执行
-# fi
-# --- 挂载路径修改结束 (已禁用) ---
+# 下载 nginx-host.conf 文件
+echo -e "${YELLOW}下载 nginx-host.conf 文件...${NC}"
+curl -L "https://bitbucket.org/michaelcode/sqsmanager/downloads/nginx-host.conf" -o $INSTALL_DIR/nginx-host.conf || {
+    echo -e "${RED}下载 nginx-host.conf 失败${NC}"
+    exit 1
+}
+echo -e "${GREEN}nginx-host.conf 文件已下载${NC}"
 
 # 检查是否已有 .env 文件，如没有则创建
 if [ ! -f "$INSTALL_DIR/.env" ]; then
@@ -189,15 +170,7 @@ fi
 
 echo -e "${GREEN}配置文件已就绪${NC}"
 
-# 设置防火墙规则（如果启用了 UFW）
-if command -v ufw &> /dev/null && ufw status | grep -q "active"; then
-    echo -e "${YELLOW}配置防火墙规则...${NC}"
-    ufw allow 80/tcp
-    ufw allow 443/tcp
-    echo -e "${GREEN}防火墙规则已配置${NC}"
-fi
 
-# 询问用户操作
 echo ""
 echo -e "${YELLOW}请选择操作:${NC}"
 echo "1) 安装/更新 SQSManager"
@@ -211,6 +184,15 @@ read -p "请输入选项 [1-7]: " choice < /dev/tty
 
 case $choice in
     1)
+        echo -e "${YELLOW}检查当前服务状态...${NC}"
+        # 检查是否有正在运行的服务容器
+        if [ -n "$(docker-compose -f $INSTALL_DIR/docker-compose.yml ps -q)" ]; then
+            echo -e "${YELLOW}检测到正在运行的服务，正在停止...${NC}"
+            docker-compose -f $INSTALL_DIR/docker-compose.yml down || echo -e "${RED}停止服务失败，可能服务已停止。继续执行...${NC}"
+        else
+            echo -e "${GREEN}服务未运行或已停止。${NC}"
+        fi
+        
         echo -e "${YELLOW}正在拉取最新镜像...${NC}"
         docker-compose -f $INSTALL_DIR/docker-compose.yml pull
         
@@ -222,7 +204,7 @@ case $choice in
         ;;
     2)
         echo -e "${YELLOW}正在启动 SQSManager...${NC}"
-        docker-compose -f $INSTALL_DIR/docker-compose.yml up -d
+        docker-compose -f $INSTALL_DIR/docker-compose.yml up -d # Start without forcing build
         echo -e "${GREEN}SQSManager 已启动${NC}"
         echo -e "${GREEN}可以通过浏览器访问: http://$(hostname -I | awk '{print $1}')${NC}"
         ;;
