@@ -51,6 +51,44 @@ download_file() {
 # 安装依赖
 install_dependencies() {
     log_warn "安装必要的软件包..."
+
+    # --- BEGIN APT Mirror Configuration ---
+    # 检查是否为 Ubuntu 系统，如果不是则跳过镜像配置
+    if command -v lsb_release >/dev/null && lsb_release -a | grep -q 'Ubuntu'; then
+        # Get Ubuntu codename
+        UBUNTU_CODENAME=$(lsb_release -cs)
+        if [ -z "$UBUNTU_CODENAME" ]; then
+            log_error "无法获取 Ubuntu codename，跳过 APT 镜像配置。"
+        else
+            # Backup original sources.list
+            if [ -f /etc/apt/sources.list ]; then
+                 cp /etc/apt/sources.list /etc/apt/sources.list.bak.$(date +%F_%T)
+                 log_info "Backed up /etc/apt/sources.list to /etc/apt/sources.list.bak.*"
+            fi
+
+            # Create new sources.list using Tsinghua mirror
+            log_warn "正在为 Ubuntu $UBUNTU_CODENAME 配置清华大学 APT 镜像源..."
+            cat <<EOF > /etc/apt/sources.list
+# 清华大学镜像源
+deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ ${UBUNTU_CODENAME} main restricted universe multiverse
+# deb-src https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ ${UBUNTU_CODENAME} main restricted universe multiverse
+deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ ${UBUNTU_CODENAME}-updates main restricted universe multiverse
+# deb-src https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ ${UBUNTU_CODENAME}-updates main restricted universe multiverse
+deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ ${UBUNTU_CODENAME}-backports main restricted universe multiverse
+# deb-src https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ ${UBUNTU_CODENAME}-backports main restricted universe multiverse
+
+# 官方安全更新源 (保持不变，不使用镜像)
+deb http://security.ubuntu.com/ubuntu/ ${UBUNTU_CODENAME}-security main restricted universe multiverse
+# deb-src http://security.ubuntu.com/ubuntu/ ${UBUNTU_CODENAME}-security main restricted universe multiverse
+EOF
+            log_info "APT 源已配置为使用清华大学镜像。"
+            log_warn "正在使用清华镜像更新软件包列表..."
+        fi
+    else
+         log_warn "非 Ubuntu 系统或无法检测到 Ubuntu，跳过 APT 镜像配置。"
+    fi
+    # --- END APT Mirror Configuration ---
+
     apt-get update
     apt-get install -y apt-transport-https ca-certificates curl software-properties-common gnupg lsb-release
 }

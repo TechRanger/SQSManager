@@ -14,7 +14,15 @@ import { RconDto } from './dto/rcon.dto';
 import { FullAdminConfig, AdminGroup, AdminEntry } from './dto/admin-config.dto'; // Import Admin Config types
 import { AddGroupDto } from './dto/add-group.dto'; // Import AddGroupDto
 import { AddAdminDto } from './dto/add-admin.dto'; // Import AddAdminDto
-import { RealtimeGateway } from '../shared/realtime/realtime.gateway'; // Import the gateway
+import { Subject } from 'rxjs'; // Import Subject
+
+// Define MessageEvent interface (can be moved to a shared types file)
+export interface MessageEvent {
+    data: string | object;
+    id?: string;
+    type?: string;
+    retry?: number;
+}
 
 // Define a type for the running server info
 interface RunningServerInfo {
@@ -32,11 +40,12 @@ export class ServerInstanceService implements OnModuleDestroy, OnModuleInit {
     private runningServers: Map<number, RunningServerInfo> = new Map();
     private readonly SQUAD_APP_ID = '403240'; // Squad Dedicated Server App ID
     private activeUpdates: Set<number> = new Set(); // Track active updates
+    // Map to hold SSE update streams
+    private updateStreams = new Map<number, Subject<MessageEvent>>();
 
     constructor(
         @InjectRepository(ServerInstance)
         private serverInstanceRepository: Repository<ServerInstance>,
-        private readonly realtimeGateway: RealtimeGateway, // Inject the gateway
     ) {
         this.loadRunningServersFromSystem(); // Attempt to find existing processes on start?
     }
@@ -1383,119 +1392,157 @@ Port=21114`; // Add a default port too
         }
     }
 
-    // --- New Update Method ---
+    // --- SSE Stream Management ---
+    getUpdateStream(id: number): Subject<MessageEvent> {
+        if (!this.updateStreams.has(id)) {
+            this.logger.log(`Creating new SSE stream subject for update ID: ${id}`);
+            const subject = new Subject<MessageEvent>();
+            this.updateStreams.set(id, subject);
+            // Clean up the stream when it completes or errors
+            subject.subscribe({
+                error: () => {
+                    this.logger.log(`SSE stream for update ${id} errored. Cleaning up.`);
+                    this.updateStreams.delete(id);
+                    this.activeUpdates.delete(id); // Also ensure active update flag is cleared
+                },
+                complete: () => {
+                    this.logger.log(`SSE stream for update ${id} completed. Cleaning up.`);
+                    this.updateStreams.delete(id);
+                    this.activeUpdates.delete(id); // Also ensure active update flag is cleared
+                }
+            });
+        }
+        return this.updateStreams.get(id)!; // Non-null assertion as we just created it if missing
+    }
+
+    // --- New Update Method using SSE ---
     async updateGameFiles(id: number, steamCmdPath: string): Promise<void> {
         this.logger.log(`收到更新服务器 ${id} 游戏文件的请求 (SteamCMD Path: ${steamCmdPath})...`);
         const instance = await this.findOne(id);
+        const subject = this.getUpdateStream(id); // Get or create the stream subject
 
-        // Check if server is running (using DB state)
+        // Check if server is running
         if (instance.isRunning) {
-            this.logger.warn(`服务器 ${id} 正在运行，无法进行更新。`);
-            throw new BadRequestException('服务器正在运行，请先停止后再更新。');
+            const errorMsg = '服务器正在运行，请先停止后再更新。';
+            this.logger.warn(`服务器 ${id}: ${errorMsg}`);
+            subject.next({ data: { type: 'error', message: errorMsg } });
+            subject.complete(); // Close the stream
+            throw new BadRequestException(errorMsg);
         }
 
-        // Check if an update is already in progress for this server
-        if (this.activeUpdates.has(id)) {
-            this.logger.warn(`服务器 ${id} 的更新已经在进行中。`);
-            throw new ConflictException('此服务器的更新已经在进行中。');
+        // Check if an update is already in progress
+        if (this.activeUpdates.has(id) && this.updateStreams.has(id)) {
+             // Check if the stream is already active for this update
+            const warningMsg = '此服务器的更新已经在进行中。';
+            this.logger.warn(`服务器 ${id}: ${warningMsg}`);
+             // Send a message to any *new* subscriber, but don't create a new process
+            subject.next({ data: { type: 'log', message: warningMsg } });
+             // Do not complete here, let the original process finish
+            // Re-throw the exception to prevent starting a duplicate process via controller
+            throw new ConflictException(warningMsg);
         }
+        // Mark update as active *before* starting the process
         this.activeUpdates.add(id);
 
         const installPath = instance.installPath;
-        const updateRoom = `update-${id}`;
 
-        // 检查SteamCMD路径
+        // Check SteamCMD path
         try {
-            const fs = require('fs');
+            const fs = require('fs'); // Use require for sync check here, consider async if preferred
             if (!fs.existsSync(steamCmdPath)) {
-                this.logger.error(`SteamCMD路径不存在: ${steamCmdPath}`);
-                this.realtimeGateway.sendUpdateError(updateRoom, `SteamCMD路径不存在: ${steamCmdPath}`);
-                this.activeUpdates.delete(id);
-                return;
+                const errorMsg = `SteamCMD路径不存在: ${steamCmdPath}`;
+                this.logger.error(errorMsg);
+                subject.next({ data: { type: 'error', message: errorMsg } });
+                subject.error(new Error(errorMsg)); // Signal stream error
+                // No need to delete from activeUpdates/updateStreams here, subject error handler does it
+                return; // Exit the function
             }
         } catch (error: any) {
-            this.logger.error(`检查SteamCMD路径时出错: ${error.message}`);
-            this.realtimeGateway.sendUpdateError(updateRoom, `检查SteamCMD路径时出错: ${error.message}`);
-            this.activeUpdates.delete(id);
-            return;
+            const errorMsg = `检查SteamCMD路径时出错: ${error.message}`;
+            this.logger.error(errorMsg);
+            subject.next({ data: { type: 'error', message: errorMsg } });
+            subject.error(new Error(errorMsg)); // Signal stream error
+            return; // Exit the function
         }
 
-        // Use the provided steamCmdPath
         this.logger.log(`服务器 ${id}: 开始使用 steamcmd (${steamCmdPath}) 更新，安装目录: ${installPath}`);
-        this.realtimeGateway.sendUpdateLog(updateRoom, `服务器 ${id}: 开始使用 steamcmd (${steamCmdPath}) 更新，安装目录: ${installPath}`);
+        subject.next({ data: { type: 'log', message: `开始使用 steamcmd (${steamCmdPath}) 更新，安装目录: ${installPath}` } });
 
-        // Use standard arguments without extra quotes for the directory
-        // Ensure +force_install_dir comes before +login
         const steamCmdArgs = [
-            `+force_install_dir`, installPath, // Force install dir should come first
+            `+force_install_dir`, installPath,
             `+login`, `anonymous`,
             `+app_update`, this.SQUAD_APP_ID, `validate`,
             `+quit`
         ];
 
         try {
-            // 设置 SteamCMD 进程的选项
             const spawnOptions: any = {
                 stdio: ['ignore', 'pipe', 'pipe'],
-                env: { ...process.env } // Start by inheriting current env
+                env: { ...process.env }
             };
 
-            // Conditionally add HOME env only on non-Windows platforms
             if (process.platform !== 'win32') {
-                spawnOptions.env.HOME = '/home/steam';
-                this.realtimeGateway.sendUpdateLog(updateRoom, `检测到Linux/Unix平台，设置HOME环境变量为/home/steam`);
+                spawnOptions.env.HOME = '/home/steam'; // Default for steamcmd docker images often
+                subject.next({ data: { type: 'log', message: '检测到Linux/Unix平台，设置HOME环境变量为/home/steam' } });
             } else {
-                this.realtimeGateway.sendUpdateLog(updateRoom, `检测到Windows平台`);
+                subject.next({ data: { type: 'log', message: '检测到Windows平台' } });
             }
 
-            // 启动 SteamCMD 进程
             const updateProcess = spawn(steamCmdPath, steamCmdArgs, spawnOptions);
 
-            updateProcess.stdout.on('data', (data) => {
+            updateProcess.stdout?.on('data', (data) => {
                 const line = data.toString().trim();
                 if (line) {
                     this.logger.debug(`[SteamCMD Update ${id} STDOUT]: ${line}`);
-                    this.realtimeGateway.sendUpdateLog(updateRoom, line);
-
-                    // 检测平台错误
+                    subject.next({ data: { type: 'log', message: line } }); // Send log line via SSE
                     if (line.includes('invalidplatform')) {
-                        this.realtimeGateway.sendUpdateError(updateRoom, `SteamCMD平台错误: 当前SteamCMD版本与您的系统不兼容，请下载正确的SteamCMD版本`);
+                         subject.next({ data: { type: 'error', message: 'SteamCMD平台错误: 当前SteamCMD版本与您的系统不兼容，请下载正确的SteamCMD版本' } });
+                         // Consider stopping the process here if possible/desired
                     }
                 }
             });
 
-            updateProcess.stderr.on('data', (data) => {
+            updateProcess.stderr?.on('data', (data) => {
                 const line = data.toString().trim();
                 if (line) {
                     this.logger.warn(`[SteamCMD Update ${id} STDERR]: ${line}`);
-                    this.realtimeGateway.sendUpdateLog(updateRoom, `错误: ${line}`); // Prefix stderr lines
+                    // Send stderr lines as logs, potentially prefixed
+                    subject.next({ data: { type: 'log', message: `[STDERR] ${line}` } });
                 }
             });
 
             updateProcess.on('error', (err) => {
+                const errorMsg = `启动 steamcmd 进程失败: ${err.message}`;
                 this.logger.error(`启动 steamcmd 进程失败 (服务器 ${id}): ${err.message}`);
-                this.realtimeGateway.sendUpdateError(updateRoom, `启动 steamcmd 进程失败: ${err.message}`);
-                this.activeUpdates.delete(id); // Remove from active updates on process error
+                subject.next({ data: { type: 'error', message: errorMsg } });
+                subject.error(new Error(errorMsg)); // Signal stream error
+                // Cleanup is handled by subject's error handler
             });
 
             updateProcess.on('close', (code) => {
-                this.activeUpdates.delete(id); // Remove from active updates when process finishes
                 if (code === 0) {
+                    const completionMsg = '游戏文件更新成功完成。';
                     this.logger.log(`服务器 ${id} steamcmd 更新成功完成 (退出码: ${code})。`);
-                    this.realtimeGateway.sendUpdateComplete(updateRoom, '游戏文件更新成功完成。');
+                    subject.next({ data: { type: 'complete', message: completionMsg } });
+                    subject.complete(); // Signal successful completion
                 } else {
+                    const errorMsg = `SteamCMD 更新进程意外退出，错误码: ${code}。请检查日志获取详细信息。`;
                     this.logger.error(`服务器 ${id} steamcmd 更新失败 (退出码: ${code})。`);
-                    this.realtimeGateway.sendUpdateError(updateRoom, `SteamCMD 更新进程意外退出，错误码: ${code}。请检查日志获取详细信息。`);
+                    subject.next({ data: { type: 'error', message: errorMsg } });
+                    subject.error(new Error(errorMsg)); // Signal stream error
                 }
+                // Cleanup is handled by subject's complete/error handler
             });
 
         } catch (error: any) {
-            this.activeUpdates.delete(id); // Ensure removal on synchronous errors too
+            const errorMsg = `执行更新时发生意外错误: ${error.message}`;
             this.logger.error(`执行 steamcmd 更新时捕获到意外错误 (服务器 ${id}): ${error}`);
-            this.realtimeGateway.sendUpdateError(updateRoom, `执行更新时发生意外错误: ${error.message}`);
-            // Re-throw if needed, but usually handled by gateway message
-            // throw new InternalServerErrorException(`执行更新时发生意外错误。`);
+            subject.next({ data: { type: 'error', message: errorMsg } });
+            subject.error(new Error(errorMsg)); // Signal stream error
+            // Cleanup is handled by subject's error handler
         }
+        // Note: The function now implicitly returns Promise<void> as before,
+        // but the actual result notification happens via the SSE stream.
     }
-    // --- End New Update Method ---
+     // --- End New Update Method ---
 } 

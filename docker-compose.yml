@@ -1,7 +1,7 @@
 services:
   # 后端服务
   backend:
-    image: ${DOCKER_REGISTRY:-michael0807}/backend:${TAG:-latest}
+    image: ccr.ccs.tencentyun.com/sqsmanager/backend:latest
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -23,7 +23,7 @@ services:
   
   # 前端服务
   frontend:
-    image: ${DOCKER_REGISTRY:-michael0807}/frontend:${TAG:-latest}
+    image: ccr.ccs.tencentyun.com/sqsmanager/frontend:latest
     build:
       context: ./frontend
       dockerfile: Dockerfile

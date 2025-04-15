@@ -1,5 +1,5 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, HttpCode, HttpStatus, BadRequestException, UseGuards, ValidationPipe } from '@nestjs/common';
-import { ServerInstanceService } from './server-instance.service';
+import { Controller, Get, Post, Body, Patch, Param, Delete, HttpCode, HttpStatus, BadRequestException, UseGuards, ValidationPipe, Sse, Logger } from '@nestjs/common';
+import { ServerInstanceService, MessageEvent } from './server-instance.service';
 import { CreateServerInstanceDto } from './dto/create-server-instance.dto';
 import { UpdateServerInstanceDto } from './dto/update-server-instance.dto';
 import { ServerInstance } from './entities/server-instance.entity';
@@ -10,9 +10,11 @@ import { AddGroupDto } from './dto/add-group.dto';
 import { AddAdminDto } from './dto/add-admin.dto';
 import { RequirePermissions } from '../permission/decorators/require-permissions.decorator';
 import { UpdateGameFilesDto } from './dto/update-game-files.dto';
+import { Observable } from 'rxjs';
 
 @Controller('api/server-instances')
 export class ServerInstanceController {
+  private readonly logger = new Logger(ServerInstanceController.name);
   constructor(private readonly serverInstanceService: ServerInstanceService) {}
 
   @Post()
@@ -122,11 +124,24 @@ export class ServerInstanceController {
   @HttpCode(HttpStatus.ACCEPTED)
   @RequirePermissions('server:update')
   async updateGameFiles(
-    @Param('id') id: string, 
+    @Param('id') id: string,
     @Body(new ValidationPipe()) updateDto: UpdateGameFilesDto
   ): Promise<{ message: string }> {
      await this.serverInstanceService.updateGameFiles(+id, updateDto.steamCmdPath);
-     return { message: 'Update process started successfully.' };
+     return { message: 'Update process started. Connect to the SSE stream for logs.' };
+  }
+
+  @Sse(':id/update-stream')
+  @RequirePermissions('server:update')
+  getServerUpdateStream(
+      @Param('id') id: string
+  ): Observable<MessageEvent> {
+      const serverId = +id;
+      if (isNaN(serverId)) {
+          throw new BadRequestException('Invalid server ID.');
+      }
+      this.logger.log(`SSE connection request for update stream: server ${serverId}`);
+      return this.serverInstanceService.getUpdateStream(serverId).asObservable();
   }
 
   @Get(':id/admin-config')

@@ -1,13 +1,17 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { io, Socket } from 'socket.io-client';
+// Remove socket.io-client import
+// import { io, Socket } from 'socket.io-client';
 import Card from '../components/ui/Card';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import AlertMessage from '../components/ui/AlertMessage';
 import FluentButton from '../components/ui/FluentButton';
 
-const backendPort = 3000;
-const socketURL = `${window.location.protocol}//${window.location.hostname}:${backendPort}/realtime`;
+// Define MessageEvent structure matching backend (if using object structure)
+interface SseMessageData {
+    type: 'log' | 'error' | 'complete';
+    message: string;
+}
 
 type UpdateStatus = 'idle' | 'connecting' | 'updating' | 'success' | 'error';
 
@@ -17,7 +21,9 @@ function ServerUpdatePage() {
     const [status, setStatus] = useState<UpdateStatus>('connecting');
     const [logs, setLogs] = useState<string[]>([]);
     const [error, setError] = useState<string | null>(null);
-    const socketRef = useRef<Socket | null>(null);
+    // Remove socketRef
+    // const socketRef = useRef<Socket | null>(null);
+    const eventSourceRef = useRef<EventSource | null>(null); // Add EventSource ref
     const logContainerRef = useRef<HTMLPreElement>(null);
 
     useEffect(() => {
@@ -27,88 +33,95 @@ function ServerUpdatePage() {
             return;
         }
 
-        const serverId = id;
-        const room = `update-${serverId}`;
-        console.log(`Attempting to connect WebSocket to: ${socketURL}`); 
-
-        // Prevent multiple connections if effect runs again unexpectedly
-        if (socketRef.current) {
-            console.log("WebSocket connection already initialized. Skipping.");
+        // --- Get Auth Token --- 
+        const authToken = localStorage.getItem('authToken');
+        if (!authToken) {
+            setError('Authentication token not found. Please log in again.');
+            setStatus('error');
+            navigate('/login'); // Redirect to login if no token
             return;
         }
 
-        // Initialize socket connection
-        socketRef.current = io(socketURL, {
-            reconnectionAttempts: 3,
-            timeout: 10000,
-        });
+        const serverId = id;
+        // Construct SSE URL with token as query parameter
+        const sseUrl = `/api/server-instances/${serverId}/update-stream?token=${encodeURIComponent(authToken)}`;
+        console.log(`Attempting to connect SSE stream to: ${sseUrl}`);
 
-        const socket = socketRef.current;
+        // Prevent multiple connections
+        if (eventSourceRef.current) {
+            console.log("SSE connection already initialized. Skipping.");
+            return;
+        }
 
-        socket.on('connect', () => {
-            console.log('WebSocket connected:', socket.id);
-            socket.emit('joinUpdateRoom', room);
+        // Initialize EventSource connection
+        // withCredentials is not needed when sending token via URL
+        eventSourceRef.current = new EventSource(sseUrl);
+        const eventSource = eventSourceRef.current;
+
+        eventSource.onopen = () => {
+            console.log('SSE Connection opened.');
             setStatus('updating');
-        });
+        };
 
-        socket.on('connect_error', (err) => {
-             console.error('WebSocket connection error:', err);
-             setError(`Failed to connect to update feed: ${err.message}`);
-             setStatus('error');
-             // Attempt to disconnect if connection failed
-             socketRef.current?.disconnect(); 
-        });
+        eventSource.onerror = (err) => {
+             console.error('SSE connection error/closed:', err);
+             if (eventSource.readyState === EventSource.CLOSED) {
+                 setStatus(currentStatus => {
+                    if (currentStatus !== 'success' && currentStatus !== 'error') {
+                        setError('Connection to update feed lost or closed unexpectedly.');
+                        return 'error';
+                    }
+                    return currentStatus;
+                });
+             } else {
+                 setError('Failed to connect to update feed.');
+                 setStatus('error');
+             }
+             eventSource.close();
+        };
 
-        socket.on('disconnect', (reason) => {
-            console.log('WebSocket disconnected:', reason);
-            // Check status via ref or directly compare if needed, 
-            // but avoid causing re-run based on status here
-            setStatus(currentStatus => {
-                if (currentStatus !== 'success' && currentStatus !== 'error') {
-                    setError('Lost connection to update feed.');
-                    return 'error';
+        eventSource.onmessage = (event) => {
+            try {
+                const messageData = JSON.parse(event.data) as SseMessageData;
+                if (messageData.type === 'log') {
+                    setLogs(prev => [...prev, messageData.message]);
+                } else if (messageData.type === 'error') {
+                    setLogs(prev => [...prev, `Error: ${messageData.message}`]);
+                    setError(messageData.message);
+                    setStatus('error');
+                    eventSource.close();
+                } else if (messageData.type === 'complete') {
+                    setLogs(prev => [...prev, `Success: ${messageData.message}`]);
+                    setStatus('success');
+                    eventSource.close();
+                    setTimeout(() => navigate('/'), 3000);
+                } else {
+                     console.warn('Received unexpected SSE message structure:', messageData);
+                     setLogs(prev => [...prev, event.data]);
                 }
-                return currentStatus; // Keep success/error state
-            });
-        });
-
-        // --- Listen for update events ---
-        socket.on('updateLog', (line: string) => {
-            setLogs(prev => [...prev, line]);
-        });
-
-        socket.on('updateComplete', (message: string) => {
-            setLogs(prev => [...prev, `Success: ${message}`]);
-            setStatus('success');
-            socketRef.current?.disconnect(); // Clean up connection
-            setTimeout(() => navigate('/'), 3000); 
-        });
-
-        socket.on('updateError', (errorMessage: string) => {
-            console.error('Update Error:', errorMessage);
-            setLogs(prev => [...prev, `Error: ${errorMessage}`]);
-            setError(errorMessage);
-            setStatus('error');
-            socketRef.current?.disconnect(); // Clean up connection
-        });
-
-        socket.on('update-complete', () => {
-            setStatus('success');
-            alert('升级成功！即将返回仪表板...');
-            setTimeout(() => navigate('/'), 5000);
-        });
-
-        // Cleanup function
-        return () => {
-            if (socketRef.current) {
-                console.log('Cleaning up WebSocket connection.');
-                socketRef.current.emit('leaveUpdateRoom', room);
-                socketRef.current.disconnect();
-                socketRef.current = null;
+            } catch (e) {
+                 console.warn('Received non-JSON SSE message:', event.data);
+                 setLogs(prev => [...prev, event.data]);
+                 if (event.data.toLowerCase().startsWith('success:')) {
+                     setStatus('success');
+                     eventSource.close();
+                     setTimeout(() => navigate('/'), 3000);
+                 } else if (event.data.toLowerCase().startsWith('error:')) {
+                     setError(event.data);
+                     setStatus('error');
+                     eventSource.close();
+                 }
             }
         };
-        // Only run on mount and when id changes
-    }, [id, navigate]); 
+
+        return () => {
+            if (eventSourceRef.current) {
+                console.log('Cleaning up SSE connection.');
+                eventSourceRef.current.close();
+                eventSourceRef.current = null;
+            }
+        };
+    }, [id, navigate]);
 
     // Auto-scroll logs
     useEffect(() => {
