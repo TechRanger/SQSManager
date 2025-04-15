@@ -330,6 +330,30 @@ reset_password() {
     log_info "目前请通过应用内的用户管理功能重置密码"
 }
 
+# Configure sysctl for ICMP ping range
+echo "Configuring net.ipv4.ping_group_range..."
+
+# Check if the line already exists
+if sudo grep -q "^net.ipv4.ping_group_range" /etc/sysctl.conf; then
+    # Line exists, modify it
+    sudo sed -i 's/^net\\.ipv4\\.ping_group_range.*/net.ipv4.ping_group_range = 0 65535/' /etc/sysctl.conf
+    echo "Modified existing net.ipv4.ping_group_range setting in /etc/sysctl.conf"
+else
+    # Line does not exist, append it
+    echo "net.ipv4.ping_group_range = 0 65535" | sudo tee -a /etc/sysctl.conf > /dev/null
+    echo "Appended net.ipv4.ping_group_range setting to /etc/sysctl.conf"
+fi
+
+# Apply the changes immediately
+echo "Applying sysctl changes..."
+if sudo sysctl -p; then
+    echo "Sysctl changes applied successfully."
+else
+    echo "Failed to apply sysctl changes. Please check /etc/sysctl.conf" >&2
+fi
+
+echo "ICMP ping range configuration complete."
+
 # 主函数
 main() {
     # 欢迎信息

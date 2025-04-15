@@ -1,7 +1,8 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ServeStaticModule } from '@nestjs/serve-static';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ServerInstanceModule } from './server-instance/server-instance.module';
@@ -19,6 +20,10 @@ import { SeedModule } from './seed/seed.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './permission/guards/permissions.guard';
 import { SharedModule } from './shared/shared.module';
+import { DatabaseModule } from './database/database.module';
+import { WebsocketModule } from './websocket/websocket.module';
+import { SettingsModule } from './settings/settings.module';
+import { LogParserModule } from './log-parser/log-parser.module';
 
 @Module({
   imports: [
@@ -26,21 +31,36 @@ import { SharedModule } from './shared/shared.module';
       isGlobal: true,
       envFilePath: '.env',
     }),
-    TypeOrmModule.forRoot({
-      type: 'sqlite',
-      database: join(__dirname, '..', 'data', 'manager.db'), // 数据库文件路径, 放在项目根目录的 data/ 下
-      entities: [ServerInstance, User, Permission, Role],
-      synchronize: true, // 开发阶段自动创建数据库表 (生产环境不要用)
-      autoLoadEntities: true, // 自动加载实体
+    TypeOrmModule.forRootAsync({
+      imports: [ConfigModule],
+      useFactory: (configService: ConfigService) => ({
+        type: 'postgres',
+        host: configService.get<string>('DB_HOST', 'localhost'),
+        port: configService.get<number>('DB_PORT', 5432),
+        username: configService.get<string>('DB_USERNAME', 'postgres'),
+        password: configService.get<string>('DB_PASSWORD', 'password'),
+        database: configService.get<string>('DB_DATABASE', 'sqsmanager'),
+        entities: [join(__dirname, '**', '*.entity.{ts,js}')],
+        synchronize: configService.get<string>('NODE_ENV') !== 'production',
+      }),
+      inject: [ConfigService],
+    }),
+    ServeStaticModule.forRoot({
+      rootPath: join(__dirname, '..', 'frontend', 'dist'),
+      exclude: ['/api/*'],
     }),
     SharedModule,
-    ServerInstanceModule, // 导入我们的服务器实例模块
+    ServerInstanceModule,
     DeploymentModule,
     UserModule,
     AuthModule,
     PermissionModule,
     RoleModule,
     SeedModule,
+    DatabaseModule,
+    WebsocketModule,
+    SettingsModule,
+    LogParserModule,
   ],
   controllers: [AppController],
   providers: [
