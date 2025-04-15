@@ -83,6 +83,10 @@ export const sendRconCommand = (id: number, command: string) => apiClient.post(`
 // Function to read RCON config (password and port)
 export const readRconConfig = (installPath: string) => apiClient.post<{ password?: string; port?: number }>('/server-instances/read-rcon-config', { installPath });
 
+// --- Add function to get server chat log ---
+export const getServerChatLog = (id: number): Promise<{ data: { logContent: string } }> => 
+    apiClient.get(`/server-instances/${id}/chatlog`);
+
 // --- Auth API Calls ---
 export const loginUser = (credentials: { username: string; password: string }) => apiClient.post('/auth/login', credentials);
 
@@ -92,6 +96,25 @@ export const getBanList = (serverId: number): Promise<{ data: BanEntry[] }> => a
 export const unbanPlayer = (serverId: number, lineContent: string): Promise<void> => apiClient.delete(`/server-instances/${serverId}/bans`, { 
     data: { lineContent } // Send lineContent in the request body for DELETE
 });
+
+// 添加手动Ban的API
+export const addManualBan = (serverId: number, banData: { 
+  eosId: string, 
+  comment: string, 
+  isPermanent: boolean, 
+  expirationDate?: string,
+  expirationTimestamp?: number,
+  banLength: string
+}): Promise<void> => 
+    apiClient.post(`/server-instances/${serverId}/bans`, banData);
+
+// 编辑Ban记录的API
+export const editBan = (serverId: number, editData: {
+  originalLine: string,
+  newComment: string,
+  newExpirationTimestamp: number,
+}): Promise<void> =>
+    apiClient.put(`/server-instances/${serverId}/bans`, editData);
 
 // --- Admin Config API Calls ---
 export const getAdminConfig = (serverId: number): Promise<{ data: FullAdminConfig }> => apiClient.get(`/server-instances/${serverId}/admin-config`);

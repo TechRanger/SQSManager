@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, HttpCode, HttpStatus, BadRequestException, UseGuards, ValidationPipe, Sse, Logger } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, HttpCode, HttpStatus, BadRequestException, UseGuards, ValidationPipe, Sse, Logger, Req, Put } from '@nestjs/common';
 import { ServerInstanceService, MessageEvent } from './server-instance.service';
 import { CreateServerInstanceDto } from './dto/create-server-instance.dto';
 import { UpdateServerInstanceDto } from './dto/update-server-instance.dto';
@@ -11,6 +11,7 @@ import { AddAdminDto } from './dto/add-admin.dto';
 import { RequirePermissions } from '../permission/decorators/require-permissions.decorator';
 import { UpdateGameFilesDto } from './dto/update-game-files.dto';
 import { Observable } from 'rxjs';
+import { AddManualBanDto } from './dto/ban.dto';
 
 @Controller('api/server-instances')
 export class ServerInstanceController {
@@ -113,6 +114,31 @@ export class ServerInstanceController {
     return this.serverInstanceService.getBanList(+id);
   }
 
+  @Post(':id/bans')
+  @HttpCode(HttpStatus.CREATED)
+  @RequirePermissions('server:manage_bans_web')
+  async addManualBan(
+    @Param('id') id: string, 
+    @Body() addManualBanDto: AddManualBanDto,
+    @Req() req: any
+  ): Promise<void> {
+    if (addManualBanDto.expirationDate === '') {
+      delete addManualBanDto.expirationDate;
+    }
+    return this.serverInstanceService.addManualBan(+id, addManualBanDto, req.user?.username || 'WebAdmin');
+  }
+
+  @Put(':id/bans')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions('server:manage_bans_web')
+  async editBan(
+    @Param('id') id: string,
+    @Body() editBanDto: { originalLine: string; newComment: string; newExpirationTimestamp: number },
+    @Req() req: any
+  ): Promise<void> {
+    return this.serverInstanceService.editBan(+id, editBanDto, req.user?.username || 'WebAdmin');
+  }
+
   @Delete(':id/bans')
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequirePermissions('server:manage_bans_web')
@@ -189,5 +215,12 @@ export class ServerInstanceController {
       @Param('groupName') groupName: string
   ): Promise<void> {
       await this.serverInstanceService.deleteAdmin(+id, steamId, decodeURIComponent(groupName));
+  }
+
+  @Get(':id/chatlog')
+  @RequirePermissions('server:view_chat')
+  async getChatLog(@Param('id') id: string): Promise<{ logContent: string }> {
+      const logContent = await this.serverInstanceService.readChatLog(+id);
+      return { logContent };
   }
 } 

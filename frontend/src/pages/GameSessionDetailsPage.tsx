@@ -6,7 +6,10 @@ import {
   getServerInstanceStatus, 
   sendRconCommand,
   getBanList,
-  unbanPlayer 
+  unbanPlayer,
+  getServerChatLog,
+  addManualBan,
+  editBan
 } from '../services/api';
 import Card from '../components/ui/Card';
 import FluentButton from '../components/ui/FluentButton';
@@ -16,7 +19,7 @@ import LoadingSpinner from '../components/ui/LoadingSpinner';
 import FluentTable from '../components/ui/FluentTable';
 import FluentRow from '../components/ui/FluentRow';
 import BanList from '../components/BanList';
-import { LuRefreshCw, LuArrowLeft, LuSend, LuTrash, LuUserX, LuToggleLeft, LuToggleRight, LuSettings, LuX, LuTriangle, LuUsers, LuArrowRightLeft, LuRotateCw, LuMap, LuMapPin } from "react-icons/lu";
+import { LuRefreshCw, LuArrowLeft, LuSend, LuTrash, LuUserX, LuToggleLeft, LuToggleRight, LuSettings, LuX, LuTriangle, LuUsers, LuArrowRightLeft, LuRotateCw, LuMap, LuMapPin, LuMessagesSquare } from "react-icons/lu";
 import { BanEntry } from '../types/ban';
 
 // 玩家接口
@@ -130,6 +133,99 @@ function FluentTabs({ value, onChange, tabs }: TabsProps) {
   );
 }
 
+// -- Define interfaces --
+
+// -- Parsed Log Line Structure --
+interface ParsedLogLine {
+  timestamp: string;
+  type: string;      // ChatAll, ChatTeam, System/Event, Unknown
+  team?: string;     // '1', '2', '?'
+  squad?: string;    // '1', '2', ..., '?'
+  playerName: string; // Just the name
+  steamId: string;    // Just the ID
+  message: string;
+  rawLine: string;    // Keep the original line for debugging or fallback
+}
+
+// -- Helper function to parse a single log line (DEFINED OUTSIDE THE COMPONENT) --
+const parseLogLine = (line: string): ParsedLogLine | null => {
+  const rawLine = line.trim(); // Trim leading/trailing whitespace from the line first
+  if (!rawLine) return null; // Skip empty lines immediately
+
+  // Regex V3: [Timestamp] [ChatType] [T:Team S:Squad] PlayerName (SteamID): Message
+  // Made spaces flexible `\s+`, player name capture `(.*?)` (allows spaces in name)
+  const regexV3 = /^\[(.*?)\] \[(.*?)\]\s+\[T:(\d+|\?)\s+S:(\d+|\?)\]\s+(.*?)\s+\((.*?)\):\s*(.*)$/;
+  const matchV3 = rawLine.match(regexV3);
+  if (matchV3) {
+    return {
+      timestamp: matchV3[1],
+      type: matchV3[2],
+      team: matchV3[3],
+      squad: matchV3[4],
+      playerName: matchV3[5].trim(),
+      steamId: matchV3[6],
+      message: matchV3[7],
+      rawLine: rawLine,
+    };
+  }
+
+  // Regex V2: [Timestamp] [ChatType] PlayerName (SteamID): Message
+  // Made spaces flexible `\s+`
+  const regexV2 = /^\[(.*?)\] \[(.*?)\]\s+(.*?)\s+\((.*?)\):\s*(.*)$/;
+  const matchV2 = rawLine.match(regexV2);
+  if (matchV2) {
+    return {
+      timestamp: matchV2[1],
+      type: matchV2[2],
+      playerName: matchV2[3].trim(),
+      steamId: matchV2[4],
+      message: matchV2[5],
+      rawLine: rawLine,
+    };
+  }
+
+  // Regex V1: [Timestamp] PlayerName (SteamID): Message
+  // Made spaces flexible `\s+`
+  const regexV1 = /^\[(.*?)\]\s+(.*?)\s+\((.*?)\):\s*(.*)$/;
+  const matchV1 = rawLine.match(regexV1);
+  if (matchV1) {
+    return {
+      timestamp: matchV1[1],
+      type: 'Unknown',
+      playerName: matchV1[2].trim(),
+      steamId: matchV1[3],
+      message: matchV1[4],
+      rawLine: rawLine,
+    };
+  }
+
+  // Regex Simple: [Timestamp] Message
+  // Made spaces flexible `\s+`
+  const regexSimple = /^\[(.*?)\]\s+(.*)$/;
+  const matchSimple = rawLine.match(regexSimple);
+  if (matchSimple) {
+    return {
+      timestamp: matchSimple[1],
+      type: 'System/Event',
+      playerName: '-',
+      steamId: '-',
+      message: matchSimple[2],
+      rawLine: rawLine,
+    };
+  }
+
+  console.warn("Failed to parse log line:", rawLine);
+  // Fallback for unparsed lines - return a specific structure
+  return {
+    timestamp: new Date().toISOString(),
+    type: 'Unparsed',
+    playerName: '-',
+    steamId: '-',
+    message: rawLine,
+    rawLine: rawLine,
+  };
+};
+
 function GameSessionDetailsPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -168,10 +264,11 @@ function GameSessionDetailsPage() {
   const [banModalOpen, setBanModalOpen] = useState(false);
   const [playerToBan, setPlayerToBan] = useState<Player | null>(null);
   const [banReason, setBanReason] = useState('');
-  const [isPermanentBan, setIsPermanentBan] = useState(true); // 是否永久封禁
-  const [banEndDate, setBanEndDate] = useState<string>(
-    new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] // 默认7天后
-  );
+  const [isPermanentBan, setIsPermanentBan] = useState(false);
+  // 添加封禁时长选择
+  const [banLength, setBanLength] = useState('7d'); // 默认7天
+  // 日期选择保留用于自定义时长
+  const [banEndDate, setBanEndDate] = useState<string>('');
   const [isBanning, setIsBanning] = useState(false);
   
   // 警告玩家
@@ -196,6 +293,43 @@ function GameSessionDetailsPage() {
   const [layerName, setLayerName] = useState('');
   const [layerOperation, setLayerOperation] = useState<'change' | 'next'>('change');
   const [isLayerOperationLoading, setIsLayerOperationLoading] = useState(false);
+  
+  // Add state for chat log
+  const [chatLog, setChatLog] = useState<string>('');
+  const [chatLogLoading, setChatLogLoading] = useState(false);
+  const [chatLogError, setChatLogError] = useState<string | null>(null);
+  const chatLogRef = useRef<HTMLDivElement>(null); // Ref for scrolling chat log
+  
+  // 添加手动Ban模态框状态
+  const [manualBanModalOpen, setManualBanModalOpen] = useState(false);
+  const [manualBanEosId, setManualBanEosId] = useState('');
+  const [manualBanReason, setManualBanReason] = useState('');
+  const [manualBanIsPermanent, setManualBanIsPermanent] = useState(false);
+  const [manualBanLength, setManualBanLength] = useState('7d'); // 默认7天
+  const [manualBanExpirationDate, setManualBanExpirationDate] = useState('');
+  const [isAddingBan, setIsAddingBan] = useState(false);
+  
+  // 格式化时间戳函数
+  const formatTimestamp = (timestamp: number): string => {
+    if (timestamp === 0) return '永久';
+    try {
+      return new Date(timestamp * 1000).toLocaleString();
+    } catch (e) {
+      return '无效日期';
+    }
+  };
+  
+  // 添加编辑Ban模态框状态
+  const [editBanModalOpen, setEditBanModalOpen] = useState(false);
+  const [banToEdit, setBanToEdit] = useState<BanEntry | null>(null);
+  const [editBanComment, setEditBanComment] = useState('');
+  const [editBanIsPermanent, setEditBanIsPermanent] = useState(false);
+  const [editBanExpirationDate, setEditBanExpirationDate] = useState('');
+  const [isEditingBan, setIsEditingBan] = useState(false);
+  
+  // 添加聊天分页状态
+  const [chatCurrentPage, setChatCurrentPage] = useState(1);
+  const chatRecordsPerPage = 20;
   
   // 获取服务器详情和状态
   useEffect(() => {
@@ -453,9 +587,13 @@ hasSquad值: ${player.hasSquad}
       // 确保有封禁原因，如果用户未提供则使用默认值
       const finalBanReason = banReason.trim() || "违反服务器规则";
       
-      // 构建并发送RCON命令 - 使用 AdminBan <SteamId> <BanReason> 格式
-      // 注意：此处我们使用永久封禁模式，不需要时长参数
-      const command = `AdminBan "${playerToBan.steamId}" "${finalBanReason}"`;
+      // 使用选择的封禁时长或永久封禁
+      let finalBanLength = isPermanentBan ? "0" : banLength;
+      
+      // 构建并发送RCON命令 - 使用 AdminBan <SteamId> <BanLength> <BanReason> 格式
+      const command = `AdminBan ${playerToBan.steamId} ${finalBanLength} ${finalBanReason}`;
+      console.log(`执行Ban命令: ${command}`); // 调试用，记录实际发送的命令
+      
       const response = await sendRconCommand(parseInt(id), command);
       
       // 修改成功判断条件，同时支持中英文成功消息
@@ -469,18 +607,25 @@ hasSquad值: ${player.hasSquad}
           ...prev, 
           { 
             command: command, 
-            response: `玩家 ${playerToBan.name} 封禁成功。${isPermanentBan ? '永久封禁' : `封禁至 ${banEndDate}`}
+            response: `玩家 ${playerToBan.name} 封禁成功。${isPermanentBan ? '永久封禁' : `封禁时长: ${finalBanLength}`}
 原始服务器响应: ${response.data.response}`
           }
         ]);
         
-        // 刷新服务器状态以更新玩家列表
-        refreshServerStatus();
+        // 关闭模态框
         setBanModalOpen(false);
+        
+        // 先立即刷新一次服务器状态
+        await refreshServerStatus();
+        
+        // 延迟1秒后再次刷新，确保服务器有足够时间更新玩家列表
+        setTimeout(async () => {
+          await refreshServerStatus(false); // 不显示刷新指示器，避免闪烁
+        }, 1000);
       } else {
         throw new Error(response.data?.response || "封禁玩家失败");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("封禁玩家出错:", err);
       setError(err instanceof Error ? err.message : "封禁玩家时发生未知错误");
       
@@ -489,7 +634,7 @@ hasSquad值: ${player.hasSquad}
         setRconResponses(prev => [
           ...prev, 
           { 
-            command: `AdminBan "${playerToBan.steamId}" ...`, 
+            command: `AdminBan ${playerToBan.steamId} ...`, 
             response: `错误: 封禁 ${playerToBan.name} 失败 - ${err instanceof Error ? err.message : "未知错误"}`
           }
         ]);
@@ -874,6 +1019,181 @@ hasSquad值: ${player.hasSquad}
     }
   };
   
+  // Fetch chat log when chat tab becomes active OR manually refreshed
+  const fetchChatLog = async () => {
+    if (!id) return;
+    setChatLogLoading(true);
+    setChatLogError(null);
+    try {
+      const response = await getServerChatLog(parseInt(id));
+      setChatLog(response.data.logContent);
+      // Scrolling is handled by the useEffect below
+    } catch (err: any) {
+      console.error("获取聊天日志失败:", err);
+      setChatLogError(err.response?.data?.message || '获取聊天日志失败');
+    } finally {
+      setChatLogLoading(false);
+    }
+  };
+
+  // Fetch chat log when chat tab initially becomes active
+  useEffect(() => {
+    if (activeTab === 'chat') {
+      fetchChatLog();
+    }
+  }, [activeTab, id]); // Correct dependencies for initial fetch
+
+  // Scroll RCON console to bottom
+  useEffect(() => {
+    if (rconConsoleRef.current) {
+      rconConsoleRef.current.scrollTop = rconConsoleRef.current.scrollHeight;
+    }
+  }, [rconResponses]);
+
+  // Scroll Chat Log to TOP when chatLog updates and tab is active
+  useEffect(() => {
+    if (activeTab === 'chat' && chatLogRef.current) {
+      chatLogRef.current.scrollTop = 0;
+    }
+  }, [chatLog, activeTab]); // Correct dependencies for scrolling
+
+  // 执行添加手动Ban
+  const executeAddManualBan = async () => {
+    if (!id) return;
+    
+    // 验证表单
+    if (!manualBanEosId.trim()) {
+      alert('请输入玩家EOS ID');
+      return;
+    }
+    
+    if (!manualBanReason.trim()) {
+      alert('请输入封禁原因');
+      return;
+    }
+    
+    // 如果不是永久封禁，则需要验证日期
+    if (!manualBanIsPermanent && !manualBanExpirationDate) {
+      alert('请选择封禁截止日期');
+      return;
+    }
+    
+    setIsAddingBan(true);
+    
+    try {
+      // 将截止日期转换为timestamp
+      let expirationTimestamp = 0; // 默认为0表示永久封禁
+      
+      if (!manualBanIsPermanent && manualBanExpirationDate) {
+        // 将日期转换为当天早上0点01分的timestamp
+        const expDate = new Date(manualBanExpirationDate);
+        expDate.setHours(0, 0, 1, 0); // 设置为0:0:1
+        expirationTimestamp = Math.floor(expDate.getTime() / 1000); // 转换为秒级时间戳
+      }
+      
+      await addManualBan(parseInt(id), {
+        eosId: manualBanEosId.trim(),
+        comment: manualBanReason.trim() || '违反服务器规则',
+        isPermanent: manualBanIsPermanent,
+        expirationTimestamp: expirationTimestamp,
+        banLength: '' // 不再使用banLength
+      });
+      
+      // 清空表单
+      setManualBanEosId('');
+      setManualBanReason('');
+      setManualBanIsPermanent(false);
+      setManualBanLength('7d');
+      setManualBanExpirationDate('');
+      
+      // 刷新Ban列表
+      await fetchBanList();
+      
+      // 关闭模态框
+      setManualBanModalOpen(false);
+    } catch (err: any) {
+      console.error('添加Ban记录失败:', err);
+      alert(`添加Ban记录失败: ${err.response?.data?.message || err.message || '未知错误'}`);
+    } finally {
+      setIsAddingBan(false);
+    }
+  };
+  
+  // 打开手动Ban模态框
+  const openManualBanModal = () => {
+    // 重置表单状态
+    setManualBanEosId('');
+    setManualBanReason('');
+    setManualBanIsPermanent(false); // 默认不是永久封禁
+    setManualBanLength('7d'); // 默认7天
+    setManualBanExpirationDate('');
+    
+    setManualBanModalOpen(true);
+  };
+  
+  // 打开编辑Ban模态框
+  const openEditBanModal = (ban: BanEntry) => {
+    setBanToEdit(ban);
+    setEditBanComment(ban.comment || '');
+    setEditBanIsPermanent(ban.expirationTimestamp === 0);
+    
+    // 如果不是永久封禁，设置日期
+    if (ban.expirationTimestamp > 0) {
+      const expDate = new Date(ban.expirationTimestamp * 1000);
+      setEditBanExpirationDate(expDate.toISOString().split('T')[0]);
+    } else {
+      setEditBanExpirationDate('');
+    }
+    
+    setEditBanModalOpen(true);
+  };
+  
+  // 执行编辑Ban
+  const executeEditBan = async () => {
+    if (!id || !banToEdit) return;
+    
+    setIsEditingBan(true);
+    
+    try {
+      // 计算新的过期时间戳
+      let newExpirationTimestamp = 0; // 默认为永久封禁
+      
+      if (!editBanIsPermanent && editBanExpirationDate) {
+        // 将日期转换为当天早上0点01分的timestamp
+        const expDate = new Date(editBanExpirationDate);
+        expDate.setHours(0, 0, 1, 0); // 设置为0:0:1
+        newExpirationTimestamp = Math.floor(expDate.getTime() / 1000); // 转换为秒级时间戳
+      }
+      
+      // 发送编辑请求
+      await editBan(parseInt(id), {
+        originalLine: banToEdit.originalLine,
+        newComment: editBanComment.trim() || '违反服务器规则',
+        newExpirationTimestamp: newExpirationTimestamp
+      });
+      
+      // 刷新Ban列表
+      await fetchBanList();
+      
+      // 关闭模态框并清空数据
+      setEditBanModalOpen(false);
+      setBanToEdit(null);
+    } catch (err: any) {
+      console.error('编辑Ban记录失败:', err);
+      alert(`编辑Ban记录失败: ${err.response?.data?.message || err.message || '未知错误'}`);
+    } finally {
+      setIsEditingBan(false);
+    }
+  };
+  
+  // 聊天分页处理函数
+  const handleChatPaginate = (pageNumber: number) => {
+    if (chatLogRef.current) {
+      chatLogRef.current.scrollTop = 0;
+    }
+    setChatCurrentPage(pageNumber);
+  };
+  
   // 如果用户没有对局管理权限，显示错误信息
   if (!hasPermission('game_session:view')) {
     return (
@@ -919,6 +1239,33 @@ hasSquad值: ${player.hasSquad}
     );
   }
   
+  // Check permissions for specific tabs if needed
+  const canManageBans = hasPermission('server:manage_bans_web');
+  const canUseRcon = hasPermission('server:rcon');
+  // Add permission check for chat view
+  const canViewChat = hasPermission('server:view_chat'); // Use the same permission as backend
+
+  // Define tabs, adding the Chat tab
+  const tabs: TabOption[] = [
+    { id: 'settings', label: '服务器设置' },
+    { id: 'players', label: '玩家列表' },
+    { id: 'disconnected', label: '最近离开玩家' },
+    // Only show RCON if user has permission and RCON is enabled on server
+    ...(canUseRcon && server.rconEnabled ? [{ id: 'rcon', label: 'RCON控制台' }] : []),
+    // Only show Ban Management if user has permission
+    ...(canManageBans ? [{ id: 'bans', label: 'Ban管理' }] : []),
+    // Add Chat tab conditionally based on permission
+    ...(canViewChat ? [{ id: 'chat', label: '实时聊天' }] : []),
+    // Add Plugins tab (keep existing logic)
+    { id: 'plugins', label: '插件管理' },
+  ];
+
+  // Filter tabs based on permissions or server state
+  const availableTabs = tabs.filter(tab => {
+    // You might add more conditions here if needed
+    return true;
+  });
+  
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -945,14 +1292,6 @@ hasSquad值: ${player.hasSquad}
             </span>
           )}
         </div>
-        <FluentButton 
-          variant="secondary" 
-          icon={<LuRefreshCw />}
-          onClick={() => refreshServerStatus()}
-          disabled={refreshing}
-        >
-          {refreshing ? '刷新中...' : '刷新'}
-        </FluentButton>
       </div>
       
       <Card>
@@ -960,14 +1299,7 @@ hasSquad值: ${player.hasSquad}
           <FluentTabs
             value={activeTab}
             onChange={setActiveTab}
-            tabs={[
-              { id: 'settings', label: '服务器设置' },
-              { id: 'players', label: '玩家列表' },
-              { id: 'disconnected', label: '最近离开玩家' },
-              { id: 'rcon', label: 'RCON控制台' },
-              { id: 'bans', label: 'Ban管理' },
-              { id: 'plugins', label: '插件管理' },
-            ]}
+            tabs={availableTabs}
           />
         </div>
         
@@ -1318,25 +1650,185 @@ hasSquad值: ${player.hasSquad}
             <div className="space-y-4">
               <div className="flex justify-between items-center">
                 <h3 className="text-lg font-semibold">Ban列表管理</h3>
-                <FluentButton
-                  variant="secondary"
-                  size="small"
-                  icon={<LuRefreshCw />}
-                  onClick={fetchBanList}
-                  disabled={bansLoading}
-                >
-                  {bansLoading ? '刷新中...' : '刷新'}
-                </FluentButton>
+                <div className="flex space-x-2">
+                  <FluentButton
+                    variant="danger"
+                    size="small"
+                    onClick={openManualBanModal}
+                  >
+                    手动添加Ban
+                  </FluentButton>
+                  <FluentButton
+                    variant="secondary"
+                    size="small"
+                    icon={<LuRefreshCw />}
+                    onClick={fetchBanList}
+                    disabled={bansLoading}
+                  >
+                    {bansLoading ? '刷新中...' : '刷新'}
+                  </FluentButton>
+                </div>
               </div>
               
               <BanList 
                 bans={bans} 
                 onUnban={handleUnban} 
+                onEdit={openEditBanModal}
                 isLoading={bansLoading} 
                 error={bansError} 
               />
             </div>
           )}
+        </FluentTab>
+        
+        <FluentTab value={activeTab} tabId="chat">
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <h3 className="text-lg font-semibold">实时聊天日志</h3>
+              <FluentButton
+                variant="secondary"
+                size="small"
+                icon={<LuRefreshCw />}
+                onClick={fetchChatLog}
+                disabled={chatLogLoading}
+              >
+                {chatLogLoading ? '刷新中...' : '刷新'}
+              </FluentButton>
+            </div>
+            
+            {chatLogError && <AlertMessage type="error" message={chatLogError} />}
+
+            <div
+              ref={chatLogRef}
+              className="h-[600px] overflow-y-auto space-y-2 p-2 bg-gray-100 border border-gray-200 rounded-lg"
+              style={{ scrollBehavior: 'smooth' }}
+            >
+              {chatLogLoading && !chatLog ? (
+                <div className="flex justify-center items-center h-full">
+                  <LoadingSpinner text="加载聊天记录..." />
+                </div>
+              ) : chatLog.trim() ? (
+                (() => {
+                  // 预处理聊天消息
+                  const allChatMessages = [];
+                  const lines = chatLog.split('\n').reverse();
+                  
+                  for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i];
+                    if (!line.trim()) continue;
+                    
+                    const parsed = parseLogLine(line);
+                    if (!parsed || parsed.type === 'System/Event' || parsed.type === 'Unparsed') {
+                      continue;
+                    }
+                    
+                    // 时间戳格式化
+                    let formattedTimestamp = parsed.timestamp;
+                    try {
+                      if (parsed.type !== 'Unparsed') {
+                        formattedTimestamp = new Date(parsed.timestamp).toLocaleString();
+                      }
+                    } catch (e) {
+                      // 保持原始格式
+                    }
+                    
+                    // 阵营和小队信息
+                    let teamSquadInfo = '';
+                    if (parsed.team !== undefined || parsed.squad !== undefined) {
+                      const teamDisplay = parsed.team === '?' ? '无' : (parsed.team || 'N/A');
+                      const squadDisplay = parsed.squad === '?' ? '无' : (parsed.squad || 'N/A');
+                      if (teamDisplay !== 'N/A' || squadDisplay !== 'N/A') {
+                        teamSquadInfo = `阵营: ${teamDisplay} / 小队: ${squadDisplay}`;
+                      } else {
+                        teamSquadInfo = '(无阵营/小队信息)';
+                      }
+                    }
+                    
+                    allChatMessages.push({
+                      id: i,
+                      parsed,
+                      formattedTimestamp,
+                      teamSquadInfo
+                    });
+                  }
+                  
+                  // 计算分页
+                  const totalMessages = allChatMessages.length;
+                  const totalPages = Math.ceil(totalMessages / chatRecordsPerPage);
+                  const startIndex = (chatCurrentPage - 1) * chatRecordsPerPage;
+                  const endIndex = startIndex + chatRecordsPerPage;
+                  const currentPageMessages = allChatMessages.slice(startIndex, endIndex);
+                  
+                  return (
+                    <>
+                      {currentPageMessages.map(message => (
+                        <div key={message.id} className="bg-white p-3 rounded-lg shadow border border-gray-200 text-sm">
+                          <div className="flex justify-between items-start mb-2">
+                            <div className="text-gray-800 font-medium">
+                              {message.parsed.playerName} <span className="text-gray-500 text-xs">({message.parsed.steamId})</span>
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              {message.formattedTimestamp}
+                            </div>
+                          </div>
+                          
+                          <div className="flex flex-wrap gap-2 mb-3">
+                            <div className={`text-xs px-2 py-1 rounded-full ${
+                              message.parsed.type === 'ChatAll' ? 'bg-indigo-700 text-white' : 
+                              message.parsed.type === 'ChatSquad' ? 'bg-green-600 text-white' : 
+                              message.parsed.type === 'ChatTeam' ? 'bg-blue-400 text-white' : 
+                              'bg-orange-500 text-white'
+                            }`}>
+                              频道: {message.parsed.type}
+                            </div>
+                            
+                            {message.teamSquadInfo && (
+                              <div className="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-800">
+                                {message.teamSquadInfo}
+                              </div>
+                            )}
+                          </div>
+                          
+                          <div className="text-base text-gray-900 break-words border-t border-gray-100 pt-2">
+                            {message.parsed.message}
+                          </div>
+                        </div>
+                      ))}
+                      
+                      {/* 分页控件 */}
+                      {totalPages > 1 && (
+                        <div className="flex justify-center items-center mt-4 space-x-2">
+                          <FluentButton 
+                            size="small" 
+                            variant="secondary" 
+                            onClick={() => handleChatPaginate(chatCurrentPage - 1)}
+                            disabled={chatCurrentPage === 1}
+                          >
+                            上一页
+                          </FluentButton>
+                          <span className="text-sm text-gray-700">
+                            {chatCurrentPage} / {totalPages} 页 (共{totalMessages}条消息)
+                          </span>
+                          <FluentButton 
+                            size="small" 
+                            variant="secondary" 
+                            onClick={() => handleChatPaginate(chatCurrentPage + 1)}
+                            disabled={chatCurrentPage === totalPages}
+                          >
+                            下一页
+                          </FluentButton>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()
+              ) : (
+                <div className="flex justify-center items-center h-full">
+                  <p className="text-gray-500">没有聊天记录。</p>
+                </div>
+              )}
+            </div>
+          </div>
         </FluentTab>
         
         <FluentTab value={activeTab} tabId="plugins">
@@ -1450,7 +1942,7 @@ hasSquad值: ${player.hasSquad}
               
               <div className="mb-5">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  踢出原因 (可选)
+                  踢出原因 <span className="text-red-500">*</span>
                 </label>
                 <FluentInput
                   type="text"
@@ -1472,7 +1964,7 @@ hasSquad值: ${player.hasSquad}
                 <FluentButton
                   variant="danger"
                   onClick={executeKickPlayer}
-                  disabled={isKicking}
+                  disabled={isKicking || !kickReason.trim()}
                 >
                   {isKicking ? '处理中...' : '确认踢出'}
                 </FluentButton>
@@ -1504,12 +1996,15 @@ hasSquad值: ${player.hasSquad}
                 <div className="bg-gray-50 p-3 rounded-md">
                   <p className="font-medium">{playerToBan?.name}</p>
                   <p className="text-sm text-gray-500">Steam ID: {playerToBan?.steamId}</p>
+                  {playerToBan?.eosId && (
+                    <p className="text-sm text-gray-500">EOS ID: {playerToBan.eosId}</p>
+                  )}
                 </div>
               </div>
               
               <div className="mb-5">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  封禁原因 (可选)
+                  封禁原因 <span className="text-red-500">*</span>
                 </label>
                 <FluentInput
                   type="text"
@@ -1521,33 +2016,85 @@ hasSquad值: ${player.hasSquad}
               </div>
               
               <div className="mb-5">
-                <label className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={isPermanentBan}
-                    onChange={(e) => setIsPermanentBan(e.target.checked)}
-                    className="mr-2 h-4 w-4"
-                  />
-                  <span className="text-sm font-medium text-gray-700">永久封禁</span>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  封禁时长
                 </label>
-                
-                {!isPermanentBan && (
-                  <div className="mt-3">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      封禁结束日期
-                    </label>
+                <div className="flex flex-col space-y-2">
+                  <div className="flex items-center">
                     <input
-                      type="date"
-                      value={banEndDate}
-                      onChange={(e) => setBanEndDate(e.target.value)}
-                      min={new Date().toISOString().split('T')[0]}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                      type="checkbox"
+                      id="isPermanentBan"
+                      checked={isPermanentBan}
+                      onChange={(e) => setIsPermanentBan(e.target.checked)}
+                      className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500 mr-2"
                     />
-                    <p className="mt-1 text-xs text-gray-500">
-                      此日期仅用于显示，实际封禁将使用永久封禁
-                    </p>
+                    <label htmlFor="isPermanentBan" className="text-sm font-medium text-gray-700">
+                      永久封禁
+                    </label>
                   </div>
-                )}
+                  
+                  {!isPermanentBan && (
+                    <div className="mt-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        选择封禁时长:
+                      </label>
+                      <div className="grid grid-cols-4 gap-2">
+                        <button 
+                          type="button"
+                          className={`px-2 py-1 text-sm rounded ${banLength === '1d' ? 'bg-blue-100 text-blue-700 border border-blue-300' : 'bg-gray-100 text-gray-700 border border-gray-300'}`}
+                          onClick={() => setBanLength('1d')}
+                        >
+                          1天
+                        </button>
+                        <button 
+                          type="button"
+                          className={`px-2 py-1 text-sm rounded ${banLength === '3d' ? 'bg-blue-100 text-blue-700 border border-blue-300' : 'bg-gray-100 text-gray-700 border border-gray-300'}`}
+                          onClick={() => setBanLength('3d')}
+                        >
+                          3天
+                        </button>
+                        <button 
+                          type="button"
+                          className={`px-2 py-1 text-sm rounded ${banLength === '7d' ? 'bg-blue-100 text-blue-700 border border-blue-300' : 'bg-gray-100 text-gray-700 border border-gray-300'}`}
+                          onClick={() => setBanLength('7d')}
+                        >
+                          7天
+                        </button>
+                        <button 
+                          type="button"
+                          className={`px-2 py-1 text-sm rounded ${banLength === '30d' ? 'bg-blue-100 text-blue-700 border border-blue-300' : 'bg-gray-100 text-gray-700 border border-gray-300'}`}
+                          onClick={() => setBanLength('30d')}
+                        >
+                          30天
+                        </button>
+                      </div>
+                      
+                      <div className="mt-2">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          自定义时长 (可选)
+                        </label>
+                        <div>
+                          <FluentInput
+                            type="text"
+                            placeholder="例如: 1d, 7d, 0"
+                            value={banLength}
+                            onChange={(e) => {
+                              if (e.target.value) {
+                                setBanLength(e.target.value);
+                              } else {
+                                setBanLength('7d'); // 如果清空，默认为7天
+                              }
+                            }}
+                            className="w-full"
+                          />
+                          <p className="-mt-2 text-sm text-gray-500">
+                            格式: 10d (10天), 1M (1个月), 0 (永ban)
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
               
               <div className="flex justify-end space-x-3">
@@ -1561,9 +2108,9 @@ hasSquad值: ${player.hasSquad}
                 <FluentButton
                   variant="danger"
                   onClick={executeBanPlayer}
-                  disabled={isBanning}
+                  disabled={isBanning || !banReason.trim()}
                 >
-                  {isBanning ? '处理中...' : '确认封禁'}
+                  {isBanning ? '封禁中...' : '封禁玩家'}
                 </FluentButton>
               </div>
             </div>
@@ -1731,6 +2278,194 @@ hasSquad值: ${player.hasSquad}
                   className="!bg-blue-600 !text-white"
                 >
                   {isLayerOperationLoading ? '处理中...' : (layerOperation === 'change' ? '更换图层' : '设置下一图层')}
+                </FluentButton>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* 手动添加Ban模态框 */}
+      {manualBanModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
+            <div className="p-5 border-b border-gray-200 flex justify-between items-center">
+              <h3 className="text-lg font-semibold text-gray-900">手动添加Ban记录</h3>
+              <button 
+                onClick={() => setManualBanModalOpen(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <LuX size={20} />
+              </button>
+            </div>
+            
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  玩家EOS ID <span className="text-red-500">*</span>
+                </label>
+                <FluentInput
+                  type="text"
+                  placeholder="请输入玩家EOS ID..."
+                  value={manualBanEosId}
+                  onChange={(e) => setManualBanEosId(e.target.value)}
+                  className="w-full"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  封禁原因 <span className="text-red-500">*</span>
+                </label>
+                <FluentInput
+                  type="text"
+                  placeholder="请输入封禁原因..."
+                  value={manualBanReason}
+                  onChange={(e) => setManualBanReason(e.target.value)}
+                  className="w-full"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  封禁时长
+                </label>
+                <div className="flex flex-col space-y-2">
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id="manualIsPermanentBan"
+                      checked={manualBanIsPermanent}
+                      onChange={(e) => setManualBanIsPermanent(e.target.checked)}
+                      className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500 mr-2"
+                    />
+                    <label htmlFor="manualIsPermanentBan" className="text-sm font-medium text-gray-700">
+                      永久封禁
+                    </label>
+                  </div>
+                  
+                  {!manualBanIsPermanent && (
+                    <div className="mt-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        选择封禁截止日期:
+                      </label>
+                      <FluentInput
+                        type="date"
+                        value={manualBanExpirationDate}
+                        onChange={(e) => setManualBanExpirationDate(e.target.value)}
+                        min={new Date(Date.now() + 86400000).toISOString().split('T')[0]} // 最小日期为明天
+                        className="w-full"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              <div className="flex justify-end space-x-3 pt-3">
+                <FluentButton
+                  variant="secondary"
+                  onClick={() => setManualBanModalOpen(false)}
+                  disabled={isAddingBan}
+                >
+                  取消
+                </FluentButton>
+                <FluentButton
+                  variant="danger"
+                  onClick={executeAddManualBan}
+                  disabled={isAddingBan}
+                >
+                  {isAddingBan ? '添加中...' : '添加Ban记录'}
+                </FluentButton>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* 编辑Ban模态框 */}
+      {editBanModalOpen && banToEdit && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
+            <div className="p-5 border-b border-gray-200 flex justify-between items-center">
+              <h3 className="text-lg font-semibold text-gray-900">编辑Ban记录</h3>
+              <button 
+                onClick={() => setEditBanModalOpen(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <LuX size={20} />
+              </button>
+            </div>
+            
+            <div className="p-5 space-y-4">
+              <div>
+                <div className="bg-gray-50 p-3 rounded-md mb-4">
+                  <p className="font-medium">EOS ID: {banToEdit.bannedEosId}</p>
+                  <p className="text-sm text-gray-500">原始过期时间: {formatTimestamp(banToEdit.expirationTimestamp)}</p>
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  封禁原因 <span className="text-red-500">*</span>
+                </label>
+                <FluentInput
+                  type="text"
+                  placeholder="请输入封禁原因..."
+                  value={editBanComment}
+                  onChange={(e) => setEditBanComment(e.target.value)}
+                  className="w-full"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  封禁时长
+                </label>
+                <div className="flex flex-col space-y-2">
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id="editIsPermanentBan"
+                      checked={editBanIsPermanent}
+                      onChange={(e) => setEditBanIsPermanent(e.target.checked)}
+                      className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500 mr-2"
+                    />
+                    <label htmlFor="editIsPermanentBan" className="text-sm font-medium text-gray-700">
+                      永久封禁
+                    </label>
+                  </div>
+                  
+                  {!editBanIsPermanent && (
+                    <div className="mt-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        选择封禁截止日期:
+                      </label>
+                      <FluentInput
+                        type="date"
+                        value={editBanExpirationDate}
+                        onChange={(e) => setEditBanExpirationDate(e.target.value)}
+                        min={new Date(Date.now() + 86400000).toISOString().split('T')[0]} // 最小日期为明天
+                        className="w-full"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              <div className="flex justify-end space-x-3 pt-3">
+                <FluentButton
+                  variant="secondary"
+                  onClick={() => setEditBanModalOpen(false)}
+                  disabled={isEditingBan}
+                >
+                  取消
+                </FluentButton>
+                <FluentButton
+                  variant="primary"
+                  onClick={executeEditBan}
+                  disabled={isEditingBan}
+                >
+                  {isEditingBan ? '保存中...' : '保存修改'}
                 </FluentButton>
               </div>
             </div>

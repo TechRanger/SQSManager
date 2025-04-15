@@ -15,6 +15,7 @@ export type PermissionName =
   | 'server:manage_bans_web'// Use Ban/Unban feature in web UI
   | 'server:manage_admins_web' // Add the new permission for Admins.cfg
   | 'server:manage_plugins' // Manage server plugins (enable/disable)
+  | 'server:view_chat'      // View server chat log via web UI
   // Game Session Management
   | 'game_session:view'     // View active game sessions and their status
   // User Management

@@ -35,6 +35,7 @@ export class SeedService implements OnModuleInit {
             'server:control', 'server:update', 'server:rcon', 'server:manage_bans_web',
             'server:manage_admins_web', // Added missing admin management permission
             'server:manage_plugins', // 添加插件管理权限
+            'server:view_chat', // 添加聊天查看权限
             'game_session:view', // 添加对局管理查看权限
             'user:view', 'user:create', 'user:delete', 'user:assign_role', 'user:manage',
             'role:view', 'role:create', 'role:delete', 'role:assign_permissions'

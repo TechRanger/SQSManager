@@ -1,20 +1,21 @@
-import { Injectable, NotFoundException, Logger, InternalServerErrorException, BadRequestException, ConflictException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger, InternalServerErrorException, BadRequestException, ConflictException, OnModuleDestroy, OnModuleInit, HttpException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateServerInstanceDto } from './dto/create-server-instance.dto';
 import { UpdateServerInstanceDto } from './dto/update-server-instance.dto';
 import { ServerInstance } from './entities/server-instance.entity';
 import { spawn, ChildProcess } from 'child_process';
-import { Rcon } from 'rcon-client'; // Use Rcon type directly
+import { Rcon, TChatMessage, TPlayerWarned, TPlayerKicked, TPlayerBanned, TSquadCreated, TPossessedAdminCamera, TUnPossessedAdminCamera } from 'squad-rcon';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import * as ini from 'ini';
-import { BanEntry, UnbanDto } from './dto/ban.dto'; // Import Ban types
+import { BanEntry, UnbanDto, AddManualBanDto } from './dto/ban.dto'; // Import Ban types
 import { RconDto } from './dto/rcon.dto';
 import { FullAdminConfig, AdminGroup, AdminEntry } from './dto/admin-config.dto'; // Import Admin Config types
 import { AddGroupDto } from './dto/add-group.dto'; // Import AddGroupDto
 import { AddAdminDto } from './dto/add-admin.dto'; // Import AddAdminDto
 import { Subject } from 'rxjs'; // Import Subject
+import * as os from 'os'; // ADD this line for os.EOL
 
 // Define MessageEvent interface (can be moved to a shared types file)
 export interface MessageEvent {
@@ -27,7 +28,7 @@ export interface MessageEvent {
 // Define a type for the running server info
 interface RunningServerInfo {
     process: ChildProcess;
-    rcon?: Rcon | null; // Use Rcon type directly
+    rcon?: Rcon | null;
     instance: ServerInstance;
     rconConnecting?: boolean; // Flag to prevent multiple connection attempts
     rconRetryTimeout?: NodeJS.Timeout;
@@ -62,6 +63,99 @@ export class ServerInstanceService implements OnModuleDestroy, OnModuleInit {
     async onModuleInit() {
         this.logger.log("服务启动，检查现有进程状态...");
         await this.syncServerRunningStates();
+        
+        // 启动聊天日志清理定时任务
+        this.setupChatLogCleanupTask();
+    }
+
+    // 设置定时清理聊天日志的任务
+    private setupChatLogCleanupTask() {
+        // 每1分钟清理一次
+        setInterval(() => {
+            this.cleanupOldChatLogs().catch(err => {
+                this.logger.error(`清理旧聊天日志时出错: ${err.message}`);
+            });
+        }, 60 * 1000); // 1分钟 = 60秒 * 1000毫秒
+        
+        this.logger.log('聊天日志清理定时任务已设置');
+    }
+
+    // 清理旧的聊天日志
+    private async cleanupOldChatLogs(): Promise<void> {
+        this.logger.debug('开始清理旧聊天日志记录');
+        
+        try {
+            // 获取所有服务器实例
+            const allInstances = await this.findAll();
+            
+            for (const instance of allInstances) {
+                try {
+                    await this.cleanupServerChatLog(instance.id);
+                } catch (err) {
+                    this.logger.warn(`清理服务器 ${instance.id} 的聊天日志失败: ${err.message}`);
+                }
+            }
+            
+            this.logger.debug('聊天日志清理完成');
+        } catch (err) {
+            this.logger.error(`获取服务器实例列表失败: ${err.message}`);
+            throw err;
+        }
+    }
+    
+    // 清理单个服务器的聊天日志
+    private async cleanupServerChatLog(id: number): Promise<void> {
+        const instance = await this.findOne(id);
+        const logPath = this.getChatLogPath(instance.installPath, instance.id);
+        
+        try {
+            // 检查文件是否存在
+            try {
+                await fs.access(logPath);
+            } catch (err) {
+                // 文件不存在，不需要处理
+                return;
+            }
+            
+            // 读取文件内容
+            const content = await fs.readFile(logPath, 'utf-8');
+            const lines = content.split(/\r?\n/).filter(line => line.trim());
+            
+            if (lines.length === 0) {
+                return; // 没有日志，不需要处理
+            }
+            
+            // 当前时间
+            const now = new Date();
+            // 2小时前的时间戳
+            const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000);
+            
+            // 过滤保留2小时内的日志
+            const recentLines = lines.filter(line => {
+                try {
+                    // 提取时间戳 [2023-04-15T13:45:27.123Z]
+                    const match = line.match(/^\[(.*?)\]/);
+                    if (!match) return false;
+                    
+                    const timestamp = new Date(match[1]);
+                    return timestamp >= twoHoursAgo;
+                } catch (err) {
+                    // 解析日期失败，默认保留该行
+                    return true;
+                }
+            });
+            
+            // 如果有行被移除
+            if (recentLines.length < lines.length) {
+                this.logger.log(`服务器 ${id} 的聊天日志中移除了 ${lines.length - recentLines.length} 条超过2小时的记录`);
+                
+                // 写回文件
+                await fs.writeFile(logPath, recentLines.join(os.EOL), 'utf-8');
+            }
+        } catch (err) {
+            this.logger.error(`清理服务器 ${id} 的聊天日志时出错: ${err.message}`);
+            throw err;
+        }
     }
 
     // 初始化时同步服务器运行状态
@@ -435,72 +529,70 @@ Port=21114`; // Add a default port too
                 stdio: ['ignore', 'pipe', 'pipe'], // Ignore stdin, capture stdout/stderr
             });
 
-            // Store basic info immediately
-            this.runningServers.set(id, { process: serverProcess, instance, rcon: null, rconConnecting: false });
+            this.logger.log(`服务器 ${id} (${instance.name}) 进程已启动 (PID: ${serverProcess.pid})`);
 
-            serverProcess.stdout?.on('data', (data) => {
-                const message = data.toString().trim();
-                if (message) this.logger.log(`[Server ${id} STDOUT]: ${message}`);
-                // TODO: Parse specific log lines for status updates (e.g., map change, server ready)
+            // Add listeners after spawn
+            serverProcess.stdout.on('data', (data) => {
+                this.logger.log(`[${id} STDOUT]: ${data.toString().trim()}`);
+            });
+            serverProcess.stderr.on('data', (data) => {
+                this.logger.error(`[${id} STDERR]: ${data.toString().trim()}`);
             });
 
-            serverProcess.stderr?.on('data', (data) => {
-                const message = data.toString().trim();
-                 if (message) this.logger.error(`[Server ${id} STDERR]: ${message}`);
-            });
-
-            serverProcess.on('spawn', () => {
-                this.logger.log(`服务器进程 ${id} (${instance.name}) 已生成, PID: ${serverProcess.pid}`);
-                // Attempt initial RCON connection after a short delay
-                setTimeout(() => this.connectRcon(id), 5000); // Connect after 5s
-            });
-
-            serverProcess.on('close', (code, signal) => {
-                this.logger.log(`服务器进程 ${id} (${instance.name}) 已退出，退出码: ${code}, 信号: ${signal}`);
+            // Make the exit handler async to allow awaiting rcon.close()
+            serverProcess.on('exit', async (code, signal) => { 
+                this.logger.log(`服务器 ${id} (${instance.name}) 进程已退出，退出码: ${code}, 信号: ${signal}`);
                 const serverInfo = this.runningServers.get(id);
                 if (serverInfo) {
                     // Clear any pending RCON retry timeouts
                     if (serverInfo.rconRetryTimeout) {
                         clearTimeout(serverInfo.rconRetryTimeout);
+                        serverInfo.rconRetryTimeout = undefined; // Clear timeout ID
                     }
                     // Attempt to close RCON connection if it exists
                     if (serverInfo.rcon) {
                         try {
-                            serverInfo.rcon.end();
+                            await serverInfo.rcon.close(); // Now correctly awaited
                             this.logger.log(`RCON 连接已关闭 (服务器 ${id} 退出)`);
                         } catch (e: any) {
                             this.logger.warn(`关闭 RCON 连接时出错 (服务器 ${id} 退出): ${e.message}`);
                         }
                     }
+                    this.runningServers.delete(id);
                 }
-                this.runningServers.delete(id); // Remove from running map
-                
-                // 更新数据库中的服务器状态为停止
-                this.updateServerRunningState(id, false).catch(err => {
-                    this.logger.error(`更新服务器 ${id} 状态为停止时出错: ${err.message}`);
-                });
+                 // Update DB state regardless of whether it was in runningServers map
+                 await this.updateServerRunningState(id, false);
+                 // Remove update stream when server stops
+                 const stream = this.updateStreams.get(id);
+                 if (stream) {
+                     stream.complete(); // Signal completion to subscribers
+                     this.updateStreams.delete(id);
+                 }
             });
 
             serverProcess.on('error', (err) => {
-                this.logger.error(`启动服务器进程 ${id} (${instance.name}) 失败: ${err.message}`);
-                this.runningServers.delete(id); // Clean up map
-                
-                // 更新数据库中的服务器状态为停止
-                this.updateServerRunningState(id, false).catch(err => {
-                    this.logger.error(`更新服务器 ${id} 状态为停止时出错: ${err.message}`);
-                });
+                this.logger.error(`启动服务器 ${id} (${instance.name}) 进程时出错: ${err.message}`);
+                // Clean up if process failed to start properly
+                this.runningServers.delete(id);
+                this.updateServerRunningState(id, false).catch(dbErr => this.logger.error(`Failed to update DB state after process error for server ${id}: ${dbErr}`));
+                 // Remove update stream on error
+                 const stream = this.updateStreams.get(id);
+                 if (stream) {
+                     stream.error(err); // Signal error to subscribers
+                     this.updateStreams.delete(id);
+                 }
             });
 
-        } catch (error: any) {
-            this.logger.error(`执行启动命令时出错 (服务器 ${id}): ${error}`);
-            this.runningServers.delete(id); // Ensure cleanup
-            
-            // 发生错误时，确保服务器状态为停止
-            this.updateServerRunningState(id, false).catch(err => {
-                this.logger.error(`更新服务器 ${id} 状态为停止时出错: ${err.message}`);
-            });
-            
-            throw new InternalServerErrorException(`启动服务器时发生意外错误`);
+            // Store the process and RCON info
+            this.runningServers.set(id, { process: serverProcess, instance, rcon: null, rconConnecting: false });
+            await this.updateServerRunningState(id, true);
+
+            // Attempt initial RCON connection after a short delay
+            setTimeout(() => this.connectRcon(id), 5000); // Connect after 5s
+
+        } catch (err: any) {
+            this.logger.error(`启动服务器实例 ${id} 时发生内部错误: ${err.message}`);
+            throw new InternalServerErrorException(`启动服务器实例 ${id} 失败。`);
         }
     }
 
@@ -521,8 +613,9 @@ Port=21114`; // Add a default port too
          if (serverInfo.rcon) {
              this.logger.log(`关闭 RCON 连接 (服务器 ${id})`);
              try {
-                 await serverInfo.rcon.end();
+                await serverInfo.rcon.close();
              } catch (e: any) {
+                // Log error but continue stopping process
                  this.logger.warn(`停止服务器 ${id} 时关闭 RCON 连接失败: ${e.message}`);
              }
              serverInfo.rcon = null;
@@ -601,84 +694,232 @@ Port=21114`; // Add a default port too
             return;
         }
 
-        const instance = serverInfo.instance;
+        const { instance } = serverInfo;
+        if (!instance.rconPassword || !instance.rconPort) {
+             this.logger.warn(`服务器 ${id} (${instance.name}) 缺少 RCON 密码或端口，无法连接。`);
+             return;
+        }
+
         this.logger.log(`尝试连接到服务器 ${id} (${instance.name}) 的 RCON (localhost:${instance.rconPort})`);
         serverInfo.rconConnecting = true; // Set connecting flag
-        this.runningServers.set(id, serverInfo); // Update map
+
+        let rcon: Rcon | null = null; // Declare rcon variable outside try block
 
         try {
-            const rcon = await Rcon.connect({
-                host: '127.0.0.1', // Assume RCON runs locally
+            // Use squad-rcon constructor and init()
+            rcon = new Rcon({
+                id: instance.id, // Use server instance ID or another unique ID if needed
+                host: '127.0.0.1', // Assuming localhost, adjust if needed
                 port: instance.rconPort,
                 password: instance.rconPassword,
-                timeout: 15000 // Connection timeout
+                pingDelay: 60000, // Default ping delay
+                autoReconnect: false, // Disable auto-reconnect, we handle it manually
+                logEnabled: true, // Enable logging from the library
+                // REMOVE the chatListeners block from here
+                // chatListeners: { ... }
             });
 
-            this.logger.log(`RCON 已连接到服务器 ${id} (${instance.name})`);
-            serverInfo.rcon = rcon as Rcon; // Store the active connection (cast if necessary, type is Rcon)
-            serverInfo.rconConnecting = false;
-            this.runningServers.set(id, serverInfo); // Update map
-
-            rcon.on('error', (err) => {
-                this.logger.error(`服务器 ${id} (${instance.name}) RCON 连接错误: ${err.message}`);
-                if (serverInfo.rcon === rcon) { // Check if it's still the current connection
-                    serverInfo.rcon = null;
-                    this.scheduleRconReconnect(id, 20000); // Schedule reconnect on error
-                }
+            // Setup standard event listeners AFTER creating the rcon instance
+            rcon.on('connected', () => {
+                 if (this.runningServers.has(id)) { // Check if server still exists
+                     this.logger.log(`成功连接到服务器 ${id} 的 RCON`);
+                     const currentServerInfo = this.runningServers.get(id);
+                     if (currentServerInfo) {
+                         currentServerInfo.rcon = rcon; // Assign the connected instance
+                         currentServerInfo.rconConnecting = false; // Clear connecting flag
+                         // Clear retry timeout if connection successful
+                         if (currentServerInfo.rconRetryTimeout) {
+                              clearTimeout(currentServerInfo.rconRetryTimeout);
+                              currentServerInfo.rconRetryTimeout = undefined;
+                         }
+                     } else {
+                         // Server was removed while connecting, close this connection
+                         rcon?.close().catch(e => this.logger.warn(`Closing orphaned RCON connection failed: ${e.message}`));
+                     }
+                 } else {
+                     // Server was removed before connection completed, close this connection
+                     this.logger.log(`Server ${id} removed before RCON could fully connect. Closing connection.`);
+                     rcon?.close().catch(e => this.logger.warn(`Closing orphaned RCON connection failed: ${e.message}`));
+                 }
             });
 
-            rcon.on('end', () => {
-                this.logger.log(`服务器 ${id} (${instance.name}) RCON 连接已断开`);
-                if (serverInfo.rcon === rcon) { // Check if it's still the current connection
-                    serverInfo.rcon = null;
-                     // Only reconnect if the server process itself is still tracked
+            rcon.on('close', () => {
+                 this.logger.log(`RCON 连接已关闭 (服务器 ${id})`);
                      if (this.runningServers.has(id)) {
-                         this.scheduleRconReconnect(id, 15000); // Schedule reconnect on normal end
+                     const currentServerInfo = this.runningServers.get(id);
+                     if (currentServerInfo && currentServerInfo.rcon === rcon) { // Ensure it's the same instance being closed
+                         currentServerInfo.rcon = null;
+                         currentServerInfo.rconConnecting = false; // Reset connecting flag
+                         // Schedule reconnect only if the server process is still running
+                         if (currentServerInfo.process && !currentServerInfo.process.killed) {
+                              this.scheduleRconReconnect(id, 15000); // Reconnect after 15s on close
+                         }
                      }
                 }
             });
 
-        } catch (err: any) {
-            this.logger.error(`连接 RCON 到服务器 ${id} (${instance.name}) 失败: ${err.message}`);
-            serverInfo.rconConnecting = false;
-            this.runningServers.set(id, serverInfo); // Update map
-            // Schedule retry only if the server is still supposed to be running
+            rcon.on('err', (error: Error) => {
+                this.logger.error(`RCON 连接错误 (服务器 ${id}): ${error.message}`);
             if (this.runningServers.has(id)) {
-                this.scheduleRconReconnect(id, 30000); // Longer delay after connection failure
-            }
+                    const currentServerInfo = this.runningServers.get(id);
+                    if (currentServerInfo) {
+                         currentServerInfo.rcon = null; // Clear potentially broken RCON instance
+                         currentServerInfo.rconConnecting = false; // Reset connecting flag
+                         this.scheduleRconReconnect(id, 30000); // Reconnect after 30s on error
+                    }
+                }
+            });
+
+            // Add listener for raw data if needed (e.g., for commands without specific emitters)
+            rcon.on('data', (data) => {
+                // this.logger.debug(`[RCON Data ${id}]: ${JSON.stringify(data)}`);
+            });
+
+            // ADD listeners for specific game events using the standard emitter pattern
+            rcon.on('CHAT_MESSAGE', async (data: TChatMessage) => { // Make the handler async
+                // Log the raw data object to inspect its structure
+                this.logger.debug(`[Raw Chat Data]: ${JSON.stringify(data)}`); 
+
+                let teamId = '?';
+                let squadId = '?';
+                let playerName = data.name.trim(); // Use name from chat data initially
+
+                // Fetch player list to get team/squad info (potential performance impact)
+                if (serverInfo && serverInfo.rcon) { // Ensure rcon is still connected
+                    try {
+                        this.logger.debug(`[Chat Info Fetch] Getting player list for ${data.steamID}`);
+                        const listPlayersResponse = await serverInfo.rcon.execute('ListPlayers');
+                        this.logger.debug(`[Chat Info Fetch] ListPlayers Response received`);
+                        
+                        // Parse the ListPlayers response (this requires knowing the exact format)
+                        // Assuming standard Squad format: "ID: <id> | Online IDs: EOS: <eosid> steam: <steamid> | Name: <name> | Team ID: <teamid> | Squad ID: <squadid> | Is Leader: <bool> | Role: <role>"
+                        const players = listPlayersResponse.split('\n');
+                        // Correct the key to lowercase 'steam:'
+                        const playerLine = players.find(p => p.includes(`steam: ${data.steamID}`)); 
+                        
+                        if (playerLine) {
+                            this.logger.debug(`[Chat Info Fetch] Found player line: ${playerLine}`);
+                            const teamMatch = playerLine.match(/Team ID: (\d+)/);
+                            const squadMatch = playerLine.match(/Squad ID: (\d+|None)/); // Squad ID can be 'None'
+                            const nameMatch = playerLine.match(/Name: (.*?)(?:\s+\||$)/); // Extract name again from ListPlayers if needed
+
+                            if (teamMatch) teamId = teamMatch[1];
+                            if (squadMatch) squadId = squadMatch[1] === 'None' ? '?' : squadMatch[1]; // Map 'None' to '?'
+                            if (nameMatch) playerName = nameMatch[1].trim(); // Update player name from ListPlayers if more accurate
+                            this.logger.debug(`[Chat Info Fetch] Parsed Info - Team: ${teamId}, Squad: ${squadId}, Name: ${playerName}`);
+                        } else {
+                            this.logger.warn(`[Chat Info Fetch] Player ${data.steamID} not found in ListPlayers response.`);
+                        }
+                    } catch (listPlayersError: any) {
+                        this.logger.error(`[Chat Info Fetch] Failed to get ListPlayers for team/squad info: ${listPlayersError.message}`);
+                        // Proceed without team/squad info if ListPlayers fails
+                    }
+                }
+
+                // Format the log message to include the chat type AND team/squad info
+                const chatPrefix = data.chat ? `[${data.chat}]` : '[UnknownChat]';
+                const teamSquadPrefix = `[T:${teamId} S:${squadId}]`;
+                const logMessage = `${chatPrefix} ${teamSquadPrefix} ${playerName} (${data.steamID}): ${data.message}`;
+                
+                // Log to console with the new format
+                this.logger.log(`[RCON Chat ${id}] ${logMessage}`); 
+                
+                // Write to file with the new format
+                this.appendToChatLog(instance, logMessage).catch(err => {
+                     this.logger.error(`写入服务器 ${id} 的聊天日志时出错: ${err.message}`);
+                });
+            });
+
+            rcon.on('PLAYER_WARNED', (data: TPlayerWarned) => {
+                 const logMessage = `Player Warned: ${JSON.stringify(data)}`;
+                 this.logger.log(`[RCON Warn ${id}] ${logMessage}`);
+                 this.appendToChatLog(instance, logMessage).catch(err => {
+                     this.logger.error(`写入服务器 ${id} 的警告日志时出错: ${err.message}`);
+                 });
+            });
+
+            rcon.on('PLAYER_KICKED', (data: TPlayerKicked) => {
+                 const logMessage = `Player Kicked: ${JSON.stringify(data)}`;
+                 this.logger.log(`[RCON Kick ${id}] ${logMessage}`);
+                 this.appendToChatLog(instance, logMessage).catch(err => {
+                      this.logger.error(`写入服务器 ${id} 的踢出日志时出错: ${err.message}`);
+                 });
+            });
+
+            rcon.on('PLAYER_BANNED', (data: TPlayerBanned) => {
+                 const logMessage = `Player Banned: ${JSON.stringify(data)}`;
+                 this.logger.log(`[RCON Ban ${id}] ${logMessage}`);
+                 this.appendToChatLog(instance, logMessage).catch(err => {
+                      this.logger.error(`写入服务器 ${id} 的封禁日志时出错: ${err.message}`);
+                 });
+            });
+
+            rcon.on('SQUAD_CREATED', (data: TSquadCreated) => {
+                 const logMessage = `Squad Created: ${JSON.stringify(data)}`;
+                 this.logger.log(`[RCON Squad ${id}] ${logMessage}`);
+                 this.appendToChatLog(instance, logMessage).catch(err => {
+                      this.logger.error(`写入服务器 ${id} 的小队日志时出错: ${err.message}`);
+                 });
+            });
+
+            rcon.on('POSSESSED_ADMIN_CAMERA', (data: TPossessedAdminCamera) => {
+                const logMessage = `Admin Camera Possessed: ${JSON.stringify(data)}`;
+                 this.logger.log(`[RCON AdminCam ${id}] ${logMessage}`);
+                 this.appendToChatLog(instance, logMessage).catch(err => {
+                      this.logger.error(`写入服务器 ${id} 的管理员摄像机日志时出错: ${err.message}`);
+                 });
+            });
+
+            rcon.on('UNPOSSESSED_ADMIN_CAMERA', (data: TUnPossessedAdminCamera) => {
+                const logMessage = `Admin Camera Unpossessed: ${JSON.stringify(data)}`;
+                 this.logger.log(`[RCON AdminCam ${id}] ${logMessage}`);
+                 this.appendToChatLog(instance, logMessage).catch(err => {
+                      this.logger.error(`写入服务器 ${id} 的管理员摄像机日志时出错: ${err.message}`);
+                 });
+            });
+
+            // Now initialize the connection
+            await rcon.init();
+
+        } catch (error: any) {
+             this.logger.error(`初始化 RCON 连接失败 (服务器 ${id}): ${error.message}`);
+             if (rcon) {
+                 // Attempt cleanup if instance was created but init failed
+                 await rcon.close().catch(e => this.logger.warn(`Closing failed RCON connection failed: ${e.message}`));
+             }
+             const currentServerInfo = this.runningServers.get(id);
+             if (currentServerInfo) {
+                 currentServerInfo.rcon = null;
+                 currentServerInfo.rconConnecting = false; // Reset connecting flag
+                 this.scheduleRconReconnect(id, 60000); // Reconnect after 60s on initial connection failure
+             }
         }
     }
 
-
     async sendRconCommand(id: number, command: string): Promise<string> {
         const serverInfo = this.runningServers.get(id);
-        // Check if rcon exists and is authenticated
-        if (!serverInfo?.rcon?.authenticated) {
-            this.logger.warn(`无法发送 RCON 命令到 ${id}: ${!serverInfo ? '服务器未运行' : !serverInfo.rcon ? 'RCON未连接' : 'RCON未认证'}`);
-            throw new BadRequestException(`服务器 ${id} RCON 不可用。`);
+        if (!serverInfo) {
+            throw new NotFoundException(`服务器实例 ${id} 未运行或不存在。`);
+        }
+        if (!serverInfo.rcon) {
+            throw new InternalServerErrorException(`服务器 ${id} 的 RCON 未连接。请稍后再试或检查连接状态。`);
         }
 
+        this.logger.log(`向服务器 ${id} 发送 RCON 命令: ${command}`);
         try {
-            this.logger.log(`向服务器 ${id} (${serverInfo.instance.name}) 发送 RCON 命令: ${command}`);
-            
-            // 设置一个Promise超时来处理无响应的命令
-            const timeoutPromise = new Promise<string>((_, reject) => {
-                setTimeout(() => {
-                    reject(new Error('RCON命令超时，服务器无响应'));
-                }, 5000); // 5秒超时
-            });
-            
-            // 创建RCON发送命令的Promise
-            const rconPromise = serverInfo.rcon.send(command);
-            
-            // 使用Promise.race来处理两者中先完成的那个
-            const response = await Promise.race([rconPromise, timeoutPromise]);
-            
-            this.logger.debug(`服务器 ${id} RCON 响应: ${response}`);
-            return response;
-        } catch (err: any) {
-            this.logger.error(`发送 RCON 命令到服务器 ${id} (${serverInfo.instance.name}) 失败: ${err.message}`);
-            throw new InternalServerErrorException(`发送 RCON 命令失败: ${err.message}`);
+            // Use execute() from squad-rcon
+            const response = await serverInfo.rcon.execute(command);
+            this.logger.debug(`收到服务器 ${id} 的 RCON 响应`);
+            return response; // squad-rcon's execute returns the response directly
+        } catch (error: any) {
+            this.logger.error(`发送 RCON 命令到服务器 ${id} 失败: ${error.message}`);
+            // Check if the error indicates a connection issue and potentially trigger reconnect logic
+            if (error.message.includes('Not connected') || error.message.includes('closed')) {
+                 serverInfo.rcon = null; // Assume connection is dead
+                 this.scheduleRconReconnect(id, 5000); // Quick reconnect attempt
+                 throw new InternalServerErrorException(`RCON 连接丢失，无法发送命令。正在尝试重新连接...`);
+            }
+            throw new InternalServerErrorException(`发送 RCON 命令失败: ${error.message}`);
         }
     }
 
@@ -702,7 +943,7 @@ Port=21114`; // Add a default port too
         // 添加最近离开的玩家列表
         let disconnectedPlayersList: any[] = [];
 
-        if (isRunning && serverInfo?.rcon?.authenticated) {
+        if (isRunning && serverInfo?.rcon) { 
             rconStatus = 'Connected';
             try {
                 // Fetch status sequentially with timing logs
@@ -1116,6 +1357,173 @@ Port=21114`; // Add a default port too
                 this.logger.error(`Error reading or writing Bans.cfg during unban for server ${id}: ${error}`, error.stack);
                 throw new InternalServerErrorException('解 Ban 操作失败。');
             }
+        }
+    }
+
+    // 添加手动Ban到服务器
+    async addManualBan(id: number, addManualBanDto: AddManualBanDto, username: string): Promise<void> {
+        const serverInstance = await this.findOne(id);
+        const bansFilePath = this.getBansFilePath(serverInstance.installPath);
+        this.logger.log(`尝试添加手动Ban记录到: ${bansFilePath}`);
+        
+        try {
+            // 先确保Bans.cfg目录存在
+            const dirPath = path.dirname(bansFilePath);
+            await fs.mkdir(dirPath, { recursive: true });
+            
+            // 读取现有内容（如果文件存在）
+            let existingContent = '';
+            try {
+                existingContent = await fs.readFile(bansFilePath, 'utf-8');
+            } catch (err: any) {
+                if (err.code !== 'ENOENT') {
+                    // 如果是除了文件不存在以外的错误，抛出
+                    throw err;
+                }
+                // 文件不存在，将使用空字符串
+                this.logger.warn(`Bans.cfg不存在，将创建新文件: ${bansFilePath}`);
+            }
+            
+            // 检查玩家是否已在封禁列表中
+            const lines = existingContent.split(/\r?\n/);
+            const eosIdPattern = new RegExp(`Banned:${addManualBanDto.eosId}:`, 'i');
+            
+            // 获取当前时间戳（秒）
+            const currentTimestamp = Math.floor(Date.now() / 1000);
+            
+            // 标记是否找到有效的（未过期的）ban记录
+            let activeExistingBan = false;
+            
+            // 遍历所有行，检查是否有该玩家的未过期ban记录
+            for (const line of lines) {
+                if (eosIdPattern.test(line)) {
+                    // 找到匹配的EOS ID，解析时间戳
+                    // 格式：AdminName Banned:EOSID:TIMESTAMP //COMMENT
+                    const timestampMatch = line.match(/Banned:[^:]+:(\d+)/i);
+                    if (timestampMatch && timestampMatch[1]) {
+                        const banTimestamp = parseInt(timestampMatch[1]);
+                        
+                        // 如果时间戳为0，表示永久ban；或者时间戳大于当前时间，表示ban尚未过期
+                        if (banTimestamp === 0 || banTimestamp > currentTimestamp) {
+                            activeExistingBan = true;
+                            break;
+                        }
+                        // 如果时间戳小于当前时间，表示ban已过期，可以继续添加
+                        this.logger.log(`该玩家(EOS ID: ${addManualBanDto.eosId})存在过期的ban记录，允许添加新ban`);
+                    }
+                }
+            }
+            
+            // 如果存在未过期的ban记录，抛出异常
+            if (activeExistingBan) {
+                throw new ConflictException(`该玩家(EOS ID: ${addManualBanDto.eosId})已经在有效的封禁列表中。`);
+            }
+            
+            // 使用传入的用户名作为管理员名称
+            const adminName = username;
+            
+            // 确保有评论，如果没有提供则使用默认值
+            const comment = addManualBanDto.comment.trim() || '违反服务器规则';
+            
+            // 使用timestamp作为封禁时长
+            // 格式: 用户名 Banned:EOS ID:unixtimestamp //封禁原因
+            const timestamp = addManualBanDto.isPermanent ? 0 : (addManualBanDto.expirationTimestamp || 0);
+            const formattedBanEntry = `${adminName} Banned:${addManualBanDto.eosId}:${timestamp} //${comment}`;
+            
+            // 添加到文件末尾
+            let newContent: string;
+            if (existingContent.trim() === '') {
+                newContent = formattedBanEntry;
+            } else if (existingContent.endsWith('\n')) {
+                newContent = existingContent + formattedBanEntry;
+            } else {
+                newContent = existingContent + '\n' + formattedBanEntry;
+            }
+            
+            // 写入文件
+            await fs.writeFile(bansFilePath, newContent, 'utf-8');
+            this.logger.log(`成功添加Ban记录到 ${bansFilePath}`);
+            
+            // 如果服务器正在运行，发送通知
+            if (this.runningServers.has(id)) {
+                try {
+                    await this.sendRconCommand(id, `AdminBroadcast Ban列表已被后台更新。`);
+                } catch (rconError) {
+                    // 忽略通知错误，不影响主要功能
+                    this.logger.warn(`发送Ban更新通知时出错: ${rconError.message}`);
+                }
+            }
+        } catch (error: any) {
+            this.logger.error(`添加Ban记录到 ${bansFilePath} 失败: ${error.message}`);
+            throw error instanceof HttpException 
+                ? error 
+                : new InternalServerErrorException(`添加Ban记录失败: ${error.message}`);
+        }
+    }
+
+    // 编辑Ban记录
+    async editBan(id: number, editBanDto: { originalLine: string; newComment: string; newExpirationTimestamp: number }, username: string): Promise<void> {
+        const serverInstance = await this.findOne(id);
+        const bansFilePath = this.getBansFilePath(serverInstance.installPath);
+        this.logger.log(`尝试编辑Ban记录: ${bansFilePath}`);
+        
+        try {
+            // 读取现有内容
+            let existingContent = '';
+            try {
+                existingContent = await fs.readFile(bansFilePath, 'utf-8');
+            } catch (err: any) {
+                if (err.code === 'ENOENT') {
+                    throw new NotFoundException(`Ban配置文件不存在: ${bansFilePath}`);
+                }
+                throw err;
+            }
+            
+            // 将文件内容分割成行
+            const lines = existingContent.split(/\r?\n/);
+            
+            // 找到原始行的索引
+            const lineIndex = lines.findIndex(line => line === editBanDto.originalLine);
+            if (lineIndex === -1) {
+                throw new NotFoundException('未找到要编辑的Ban记录');
+            }
+            
+            // 解析原始行以获取EOS ID
+            // 原始格式：AdminName Banned:EOSID:TIMESTAMP //COMMENT
+            const originalLine = lines[lineIndex];
+            const eosIdMatch = originalLine.match(/Banned:([^:]+):/i);
+            if (!eosIdMatch || !eosIdMatch[1]) {
+                throw new BadRequestException('无法解析原始Ban记录中的EOS ID');
+            }
+            
+            const eosId = eosIdMatch[1];
+            const comment = editBanDto.newComment.trim() || '违反服务器规则';
+            
+            // 创建新的Ban记录行，使用新的管理员名称、时间戳和评论
+            const newLine = `${username} Banned:${eosId}:${editBanDto.newExpirationTimestamp} //${comment}`;
+            
+            // 替换原始行
+            lines[lineIndex] = newLine;
+            
+            // 写回文件
+            await fs.writeFile(bansFilePath, lines.join('\n'), 'utf-8');
+            
+            this.logger.log(`成功编辑Ban记录: ${bansFilePath}`);
+            
+            // 如果服务器正在运行，发送通知
+            if (this.runningServers.has(id)) {
+                try {
+                    await this.sendRconCommand(id, `AdminBroadcast Ban列表已被后台更新。`);
+                } catch (rconError) {
+                    // 忽略通知错误，不影响主要功能
+                    this.logger.warn(`发送Ban更新通知时出错: ${rconError.message}`);
+                }
+            }
+        } catch (error: any) {
+            this.logger.error(`编辑Ban记录失败: ${error.message}`);
+            throw error instanceof HttpException 
+                ? error 
+                : new InternalServerErrorException(`编辑Ban记录失败: ${error.message}`);
         }
     }
 
@@ -1545,4 +1953,66 @@ Port=21114`; // Add a default port too
         // but the actual result notification happens via the SSE stream.
     }
      // --- End New Update Method ---
+
+    private getChatLogPath(installPath: string, serverId: number): string {
+        return path.join(
+            installPath,
+            'SquadGame',
+            'Saved',
+            'Logs',
+            `RconChat_${serverId}.log`
+        );
+    }
+
+    private async appendToChatLog(instance: ServerInstance, message: string): Promise<void> {
+        const logPath = this.getChatLogPath(instance.installPath, instance.id);
+        this.logger.debug(`[Chat Log Attempt] Server ID: ${instance.id}, Path: ${logPath}`); // Log the attempt and path
+        try {
+            const dirPath = path.dirname(logPath);
+            this.logger.debug(`[Chat Log Attempt] Ensuring directory exists: ${dirPath}`);
+            await fs.mkdir(dirPath, { recursive: true });
+            this.logger.debug(`[Chat Log Attempt] Directory ensured/exists: ${dirPath}`);
+
+            const timestamp = new Date().toISOString();
+            const logLine = `[${timestamp}] ${message}${os.EOL}`;
+            this.logger.debug(`[Chat Log Attempt] Appending to file: ${logPath}`);
+            await fs.appendFile(logPath, logLine, 'utf-8');
+            this.logger.debug(`[Chat Log Success] Appended to file: ${logPath}`);
+        } catch (error: any) {
+            // Log the specific error encountered during mkdir or appendFile
+            this.logger.error(`[Chat Log Failure] Server ID: ${instance.id}, Path: ${logPath}, Error: ${error.message}`, error.stack);
+        }
+    }
+
+    // --- Add method to read chat log ---
+    async readChatLog(id: number): Promise<string> {
+        const instance = await this.findOne(id); // findOne already throws NotFoundException
+        const logPath = this.getChatLogPath(instance.installPath, instance.id);
+        this.logger.debug(`尝试读取聊天日志文件: ${logPath}`);
+        try {
+            // Ensure the directory exists before trying to read
+             const dirPath = path.dirname(logPath);
+             try {
+                 await fs.access(dirPath); // Check if directory exists
+             } catch (dirErr: any) {
+                 if (dirErr.code === 'ENOENT') {
+                     this.logger.warn(`聊天日志目录 ${dirPath} 不存在，返回空日志。`);
+                     return ''; // Return empty string if directory doesn't exist
+                 }
+                 throw dirErr; // Re-throw other directory access errors
+             }
+
+            // Now try reading the file
+            const content = await fs.readFile(logPath, 'utf-8');
+            this.logger.debug(`成功读取聊天日志文件 ${logPath}`);
+            return content;
+        } catch (error: any) {
+            if (error.code === 'ENOENT') {
+                this.logger.warn(`聊天日志文件 ${logPath} 不存在，返回空日志。`);
+                return ''; // Return empty string if file doesn't exist
+            }
+            this.logger.error(`读取聊天日志文件 ${logPath} 时出错: ${error.message}`);
+            throw new InternalServerErrorException(`读取聊天日志时出错: ${error.message}`);
+        }
+    }
 } 
