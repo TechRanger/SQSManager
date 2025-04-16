@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, Logger, InternalServerErrorException, BadRequestException, ConflictException, OnModuleDestroy, OnModuleInit, HttpException } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger, InternalServerErrorException, BadRequestException, ConflictException, OnModuleDestroy, OnModuleInit, HttpException, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateServerInstanceDto } from './dto/create-server-instance.dto';
@@ -9,13 +9,14 @@ import { Rcon, TChatMessage, TPlayerWarned, TPlayerKicked, TPlayerBanned, TSquad
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import * as ini from 'ini';
-import { BanEntry, UnbanDto, AddManualBanDto } from './dto/ban.dto'; // Import Ban types
+import { BanEntry, UnbanDto, AddManualBanDto } from './dto/ban.dto';
 import { RconDto } from './dto/rcon.dto';
-import { FullAdminConfig, AdminGroup, AdminEntry } from './dto/admin-config.dto'; // Import Admin Config types
-import { AddGroupDto } from './dto/add-group.dto'; // Import AddGroupDto
-import { AddAdminDto } from './dto/add-admin.dto'; // Import AddAdminDto
-import { Subject } from 'rxjs'; // Import Subject
-import * as os from 'os'; // ADD this line for os.EOL
+import { FullAdminConfig, AdminGroup, AdminEntry } from './dto/admin-config.dto';
+import { AddGroupDto } from './dto/add-group.dto';
+import { AddAdminDto } from './dto/add-admin.dto';
+import { Subject } from 'rxjs';
+import * as os from 'os';
+import { LogParserService } from '../log-parser/log-parser.service';
 
 // Define MessageEvent interface (can be moved to a shared types file)
 export interface MessageEvent {
@@ -30,25 +31,26 @@ interface RunningServerInfo {
     process: ChildProcess;
     rcon?: Rcon | null;
     instance: ServerInstance;
-    rconConnecting?: boolean; // Flag to prevent multiple connection attempts
+    rconConnecting?: boolean;
     rconRetryTimeout?: NodeJS.Timeout;
 }
 
 @Injectable()
 export class ServerInstanceService implements OnModuleDestroy, OnModuleInit {
     private readonly logger = new Logger(ServerInstanceService.name);
-    // Use the defined type for the map
     private runningServers: Map<number, RunningServerInfo> = new Map();
-    private readonly SQUAD_APP_ID = '403240'; // Squad Dedicated Server App ID
-    private activeUpdates: Set<number> = new Set(); // Track active updates
-    // Map to hold SSE update streams
+    private readonly SQUAD_APP_ID = '403240';
+    private activeUpdates: Set<number> = new Set();
     private updateStreams = new Map<number, Subject<MessageEvent>>();
 
     constructor(
         @InjectRepository(ServerInstance)
         private serverInstanceRepository: Repository<ServerInstance>,
+        // Inject LogParserService using forwardRef
+        @Inject(forwardRef(() => LogParserService))
+        private logParserService: LogParserService,
     ) {
-        this.loadRunningServersFromSystem(); // Attempt to find existing processes on start?
+        this.loadRunningServersFromSystem();
     }
 
     async onModuleDestroy() {
@@ -68,7 +70,6 @@ export class ServerInstanceService implements OnModuleDestroy, OnModuleInit {
         this.setupChatLogCleanupTask();
     }
 
-    // 设置定时清理聊天日志的任务
     private setupChatLogCleanupTask() {
         // 每1分钟清理一次
         setInterval(() => {
@@ -80,7 +81,6 @@ export class ServerInstanceService implements OnModuleDestroy, OnModuleInit {
         this.logger.log('聊天日志清理定时任务已设置');
     }
 
-    // 清理旧的聊天日志
     private async cleanupOldChatLogs(): Promise<void> {
         this.logger.debug('开始清理旧聊天日志记录');
         
@@ -103,7 +103,6 @@ export class ServerInstanceService implements OnModuleDestroy, OnModuleInit {
         }
     }
     
-    // 清理单个服务器的聊天日志
     private async cleanupServerChatLog(id: number): Promise<void> {
         const instance = await this.findOne(id);
         const logPath = this.getChatLogPath(instance.installPath, instance.id);
@@ -158,7 +157,6 @@ export class ServerInstanceService implements OnModuleDestroy, OnModuleInit {
         }
     }
 
-    // 初始化时同步服务器运行状态
     private async syncServerRunningStates(): Promise<void> {
         try {
             // 获取所有数据库中标记为运行中的服务器
@@ -174,8 +172,14 @@ export class ServerInstanceService implements OnModuleDestroy, OnModuleInit {
                     if (!isActuallyRunning) {
                         this.logger.warn(`服务器 ${server.id} (${server.name}) 在数据库中标记为运行中，但实际未运行，正在更新状态...`);
                         await this.updateServerRunningState(server.id, false);
+                        // Stop monitoring if DB says running but process map doesn't have it
+                        await this.logParserService.stopMonitoringInstance(server.id);
                     } else {
                         this.logger.log(`服务器 ${server.id} (${server.name}) 状态正确同步。`);
+                        // Ensure monitoring is running if DB and map both say it's running
+                        // This might be redundant if onModuleInit in LogParser already handled it,
+                        // but can serve as a fallback.
+                        // await this.logParserService.startMonitoringInstance(server);
                     }
                 }
             } else {
@@ -306,103 +310,82 @@ Port=21114`; // Add a default port too
             'ServerConfig',
             configFileName
         );
-        this.logger.debug(`尝试读取 RCON 配置从文件: ${configPath}`);
-        let password = '';
+        let password: string | undefined = undefined;
         let port: number | undefined = undefined;
 
         try {
             const content = await fs.readFile(configPath, 'utf-8');
-            
-            // Parse Password
-            const passwordMatch = content.match(/^Password=(.*)/m);
-            if (passwordMatch && passwordMatch[1]) {
-                password = passwordMatch[1].trim();
-                this.logger.debug(`从 Rcon.cfg 中读取到密码。`);
-            } else {
-                 this.logger.warn(`在 ${configPath} 中未找到有效的 Password= 行。`);
+            const lines = content.split(/\r?\n/);
+            for (const line of lines) {
+                const trimmedLine = line.trim();
+                // Ignore comments
+                if (trimmedLine.startsWith('//') || trimmedLine.startsWith('#')) {
+                    continue;
+                }
+                const matchPassword = trimmedLine.match(/^Password=(.*)/i);
+                if (matchPassword) {
+                    password = matchPassword[1].trim();
+                    continue; // Check next line for port
+                }
+                const matchPort = trimmedLine.match(/^Port=(\d+)/i);
+                if (matchPort) {
+                    port = parseInt(matchPort[1], 10);
+                    continue; // Check next line
+                }
             }
-
-            // Parse Port
-            const portMatch = content.match(/^Port=(\d+)/m);
-             if (portMatch && portMatch[1]) {
-                 const parsedPort = parseInt(portMatch[1], 10);
-                 if (!isNaN(parsedPort) && parsedPort > 0) {
-                     port = parsedPort;
-                     this.logger.debug(`从 Rcon.cfg 中读取到端口: ${port}`);
-                 } else {
-                     this.logger.warn(`在 ${configPath} 中找到无效的 Port 值: ${portMatch[1]}`);
-                 }
-             } else {
-                  this.logger.warn(`在 ${configPath} 中未找到有效的 Port= 行。`);
-             }
-
-             return { password, port };
-
-        } catch (error: any) {
-             if (error.code === 'ENOENT') {
-                this.logger.warn(`RCON 配置文件 ${configPath} 不存在。`);
-                // Return empty password and undefined port if file not found
-                return { password: '', port: undefined }; 
+            this.logger.log(`成功读取 RCON 配置: ${configPath} (Password: ${password ? '***' : '未设置'}, Port: ${port ?? '未设置'})`);
+        } catch (err: any) {
+            if (err.code === 'ENOENT') {
+                this.logger.warn(`RCON 配置文件 ${configPath} 未找到，返回默认值。`);
+                // Return default values if file not found
             } else {
-                this.logger.error(`读取 RCON 配置文件 ${configPath} 时出错: ${error.message}`);
-                throw new InternalServerErrorException(`读取 Rcon.cfg 文件时出错: ${error.message}`);
+                this.logger.error(`读取 RCON 配置文件 ${configPath} 时出错: ${err.message}`);
+                // Rethrow or handle error appropriately
+                throw new InternalServerErrorException(`读取 RCON 配置时出错: ${err.message}`);
             }
         }
+        // Ensure password is not empty string, treat as undefined
+        if (password === '') {
+            password = undefined;
+        }
+        return { password, port };
     }
 
     async create(createServerInstanceDto: CreateServerInstanceDto): Promise<ServerInstance> {
-        // Basic validation
-        if (!createServerInstanceDto.installPath || !createServerInstanceDto.rconPassword) {
-            throw new BadRequestException("安装路径和 RCON 密码不能为空");
+        this.logger.log(`尝试创建新的服务器实例: ${createServerInstanceDto.name}`);
+        // Validate install path exists
+        try {
+            const stats = await fs.stat(createServerInstanceDto.installPath);
+            if (!stats.isDirectory()) {
+                throw new BadRequestException(`提供的安装路径不是一个有效的目录: ${createServerInstanceDto.installPath}`);
+            }
+            this.logger.log(`安装路径验证成功: ${createServerInstanceDto.installPath}`);
+        } catch (err: any) {
+             if (err.code === 'ENOENT') {
+                throw new BadRequestException(`提供的安装路径不存在: ${createServerInstanceDto.installPath}`);
+            }
+            throw new InternalServerErrorException(`验证安装路径时出错: ${err.message}`);
         }
 
         const newInstance = this.serverInstanceRepository.create(createServerInstanceDto);
-
-        // Validate install path existence roughly
+        newInstance.isRunning = false; // Ensure new instances start as not running
+        
         try {
-            const stats = await fs.stat(newInstance.installPath);
-            if (!stats.isDirectory()) {
-                throw new BadRequestException(`提供的安装路径不是一个目录: ${newInstance.installPath}`);
-            }
-            // Deeper validation: check for SquadGame/Binaries structure?
+            await this.serverInstanceRepository.save(newInstance);
+            this.logger.log(`服务器实例 '${newInstance.name}' (ID: ${newInstance.id}) 创建成功。`);
+            return newInstance;
         } catch (err: any) {
-             if (err.code === 'ENOENT') {
-                 throw new BadRequestException(`安装路径不存在: ${newInstance.installPath}`);
-             } else {
-                this.logger.error(`检查安装路径时出错 (${newInstance.installPath}): ${err}`);
-                 throw new InternalServerErrorException("检查安装路径时发生错误");
-             }
+             this.logger.error(`创建服务器实例 '${createServerInstanceDto.name}' 失败: ${err.message}`);
+            // Handle potential unique constraint violations etc.
+            if (err.code === '23505') { // Example for PostgreSQL unique violation
+                throw new ConflictException(`名称为 '${createServerInstanceDto.name}' 的服务器实例已存在。`);
+            }
+             throw new InternalServerErrorException(`创建服务器实例时数据库出错: ${err.message}`);
         }
-
-        // --- Update Rcon.cfg before saving to DB ---
-        try {
-            await this._updateRconConfigFileContent(newInstance.installPath, { 
-                password: newInstance.rconPassword, 
-                port: newInstance.rconPort 
-            });
-        } catch (configError) {
-             // If updating config file fails, prevent DB save and re-throw
-             throw configError; 
-        }
-        // --- End Rcon.cfg update ---
-
-        this.logger.log(`创建新的服务器实例配置并更新Rcon.cfg: ${newInstance.name}`);
-        return this.serverInstanceRepository.save(newInstance);
     }
 
     async findAll(): Promise<ServerInstance[]> {
-        this.logger.log('调用 findAll 获取所有服务器实例...');
-        try {
-            const instances = await this.serverInstanceRepository.find();
-            this.logger.log(`数据库查询完成，找到 ${instances.length} 个实例。`);
-            // Log the IDs found
-            const instanceIds = instances.map(inst => inst.id);
-            this.logger.verbose(`找到的实例 ID: [${instanceIds.join(', ')}]`);
-            return instances;
-        } catch (error) {
-            this.logger.error(`findAll 查询数据库时出错: ${error.message}`, error.stack);
-            throw new InternalServerErrorException('获取服务器实例列表时发生错误');
-        }
+        return this.serverInstanceRepository.find();
     }
 
     async findOne(id: number): Promise<ServerInstance> {
@@ -410,86 +393,81 @@ Port=21114`; // Add a default port too
         if (!instance) {
             throw new NotFoundException(`未找到 ID 为 ${id} 的服务器实例`);
         }
-        // Return only DB data
         return instance;
     }
 
     async update(id: number, updateServerInstanceDto: UpdateServerInstanceDto): Promise<ServerInstance> {
-        const instance = await this.findOne(id); // Use findOne to leverage existing not found check
-
-        // Prevent updates if the server is running?
-        if (this.runningServers.has(id)) {
-            throw new ConflictException(`无法更新正在运行的服务器实例 ${id}。请先停止服务器。`);
-        }
-
-        // Merge updates into the existing instance
-        // Only update fields that are actually provided in the DTO
-        Object.assign(instance, updateServerInstanceDto);
-
-        // Re-validate install path if it's changed?
-        if (updateServerInstanceDto.installPath) {
-            try {
-                const stats = await fs.stat(instance.installPath);
-                if (!stats.isDirectory()) {
-                    throw new BadRequestException(`提供的安装路径不是一个目录: ${instance.installPath}`);
-                }
-            } catch (err: any) {
-                 if (err.code === 'ENOENT') {
-                     throw new BadRequestException(`安装路径不存在: ${instance.installPath}`);
-                 } else {
-                    this.logger.error(`检查更新的安装路径时出错 (${instance.installPath}): ${err}`);
-                     throw new InternalServerErrorException("检查更新的安装路径时发生错误");
-                 }
-            }
-        }
-
-        // --- Update Rcon.cfg if password or port is provided ---
-        if (updateServerInstanceDto.rconPassword !== undefined || updateServerInstanceDto.rconPort !== undefined) {
-            this.logger.log(`检测到 RCON 配置更新请求 (ID: ${id})，尝试更新 Rcon.cfg 文件...`);
-            try {
-                // Pass the relevant updates from the DTO
-                await this._updateRconConfigFileContent(instance.installPath, { 
-                    password: updateServerInstanceDto.rconPassword, 
-                    port: updateServerInstanceDto.rconPort 
-                });
-            } catch (configError) {
-                // If updating config file fails, prevent DB save and re-throw
-                 throw configError;
+        const instance = await this.findOne(id); // Ensures instance exists
+        
+        // Check if the instance is running
+        if (instance.isRunning) {
+            // If running, prevent changes to ports or install path
+             const disallowedChanges = Object.keys(updateServerInstanceDto).filter(key => 
+                ['gamePort', 'queryPort', 'beaconPort', 'rconPort', 'installPath'].includes(key) && 
+                updateServerInstanceDto[key] !== instance[key]
+            );
+            
+            if (disallowedChanges.length > 0) {
+                 throw new BadRequestException(`服务器正在运行时，不能修改以下属性: ${disallowedChanges.join(', ')}`);
             }
         } else {
-             this.logger.debug(`更新请求 (ID: ${id}) 未包含 RCON 密码或端口，跳过 Rcon.cfg 文件更新。`);
+             // If not running, allow installPath changes, but validate the new path
+             if (updateServerInstanceDto.installPath && updateServerInstanceDto.installPath !== instance.installPath) {
+                 this.logger.log(`正在验证更新的安装路径: ${updateServerInstanceDto.installPath}`);
+                 try {
+                    const stats = await fs.stat(updateServerInstanceDto.installPath);
+                if (!stats.isDirectory()) {
+                        throw new BadRequestException(`提供的新安装路径不是一个有效的目录: ${updateServerInstanceDto.installPath}`);
+                }
+                    this.logger.log(`新安装路径验证成功: ${updateServerInstanceDto.installPath}`);
+            } catch (err: any) {
+                 if (err.code === 'ENOENT') {
+                        throw new BadRequestException(`提供的新安装路径不存在: ${updateServerInstanceDto.installPath}`);
+                    }
+                     throw new InternalServerErrorException(`验证新安装路径时出错: ${err.message}`);
+                }
+            }
         }
-        // --- End Rcon.cfg update ---
-
-        this.logger.log(`更新服务器实例配置: ID ${id}`);
-        return this.serverInstanceRepository.save(instance);
+        
+        // Perform the update
+        await this.serverInstanceRepository.update(id, updateServerInstanceDto);
+        
+        // Fetch the updated instance
+        const updatedInstance = await this.findOne(id);
+        
+        // If RCON port or password changed, update the Rcon.cfg file if the server is NOT running
+        if (!updatedInstance.isRunning && (updateServerInstanceDto.rconPort !== undefined || updateServerInstanceDto.rconPassword !== undefined)) {
+             this.logger.log(`检测到 RCON 配置更改，正在更新 Rcon.cfg 文件...`);
+             try {
+                 await this._updateRconConfigFileContent(updatedInstance.installPath, {
+                    password: updateServerInstanceDto.rconPassword, 
+                     port: updateServerInstanceDto.rconPort,
+                 });
+                 this.logger.log(`Rcon.cfg 文件更新成功 (ID: ${id})`);
+             } catch (err: any) {
+                this.logger.error(`更新 Rcon.cfg 文件失败 (ID: ${id}): ${err.message}`);
+                // Decide if this should throw an error or just be a warning
+                // throw new InternalServerErrorException(`服务器配置已更新，但更新 Rcon.cfg 文件失败: ${err.message}`);
+             }
+        }
+        
+        this.logger.log(`服务器实例 ${id} 更新成功。`);
+        return updatedInstance;
     }
 
     async remove(id: number): Promise<void> {
+        const instance = await this.findOne(id); // Ensure instance exists
         if (this.runningServers.has(id)) {
-            this.logger.warn(`尝试删除正在运行的服务器 ${id}，将先停止它。`);
-            try {
-                await this.stop(id);
-            } catch (err: any) {
-                this.logger.error(`删除前停止服务器 ${id} 失败: ${err.message}。继续尝试删除记录...`);
-                 // Decide if deletion should proceed if stop fails?
-                 // For now, we continue to delete the record.
-            }
+            this.logger.warn(`尝试移除正在运行的服务器实例 ${id}。请先停止服务器。`);
+            throw new ConflictException(`服务器实例 ${id} 正在运行中，请先停止。`);
         }
+
         const result = await this.serverInstanceRepository.delete(id);
         if (result.affected === 0) {
-            // Check if it was already deleted after a failed stop
-            const exists = await this.serverInstanceRepository.findOneBy({ id });
-            if (exists) {
-                 throw new NotFoundException(`删除服务器实例 ${id} 失败，记录仍然存在。`);
-            }
-             // If it doesn't exist, it might have been deleted between stop and here, or never existed.
-             this.logger.warn(`删除 ID 为 ${id} 的实例时发现记录不存在或已被删除。`);
-        } else {
-             this.logger.log(`已删除服务器实例配置: ID ${id}`);
+             this.logger.error(`尝试删除服务器实例 ${id}，但未找到记录。`);
+            throw new NotFoundException(`未找到 ID 为 ${id} 的服务器实例`);
         }
-         // Ensure it's removed from the running map if somehow still present
-         this.runningServers.delete(id);
+        this.logger.log(`服务器实例 ${id} (${instance.name}) 已成功删除。`);
     }
 
     async start(id: number): Promise<void> {
@@ -498,7 +476,7 @@ Port=21114`; // Add a default port too
             throw new ConflictException(`服务器实例 ${id} 已在运行中。`);
         }
 
-        const instance = await this.findOne(id); // Fetch latest config from DB
+        const instance = await this.findOne(id);
 
         const executablePath = this.getServerExecutablePath(instance);
         if (!(await this.checkExecutable(executablePath))) {
@@ -508,30 +486,28 @@ Port=21114`; // Add a default port too
         const args = [
             `Port=${instance.gamePort}`,
             `QueryPort=${instance.queryPort}`,
-            `BeaconPort=${instance.beaconPort}`, // Use the instance's beacon port
+            `BeaconPort=${instance.beaconPort}`,
             '-log',
         ];
         if (instance.extraArgs) {
-            args.push(...instance.extraArgs.split(' ').filter(arg => arg)); // Add extra args, filtering empty strings
+            args.push(...instance.extraArgs.split(' ').filter(arg => arg));
         }
 
         this.logger.log(`尝试启动服务器 ${id} (${instance.name}): ${executablePath} ${args.join(' ')}`);
 
         try {
-            // 更新数据库中服务器实例的运行状态
-            instance.isRunning = true;
-            await this.serverInstanceRepository.save(instance);
-            this.logger.log(`已更新服务器 ${id} (${instance.name}) 状态为运行中`);
+            // Mark as running in DB first
+            await this.updateServerRunningState(id, true);
+            this.logger.log(`已更新数据库中服务器 ${id} (${instance.name}) 状态为运行中`);
 
             const serverProcess = spawn(executablePath, args, {
-                cwd: instance.installPath, // Often better to run from install dir root
-                detached: process.platform !== 'win32', // Detach on non-Windows
-                stdio: ['ignore', 'pipe', 'pipe'], // Ignore stdin, capture stdout/stderr
+                cwd: instance.installPath,
+                detached: process.platform !== 'win32',
+                stdio: ['ignore', 'pipe', 'pipe'],
             });
 
             this.logger.log(`服务器 ${id} (${instance.name}) 进程已启动 (PID: ${serverProcess.pid})`);
 
-            // Add listeners after spawn
             serverProcess.stdout.on('data', (data) => {
                 this.logger.log(`[${id} STDOUT]: ${data.toString().trim()}`);
             });
@@ -539,20 +515,21 @@ Port=21114`; // Add a default port too
                 this.logger.error(`[${id} STDERR]: ${data.toString().trim()}`);
             });
 
-            // Make the exit handler async to allow awaiting rcon.close()
-            serverProcess.on('exit', async (code, signal) => { 
+            // Make the exit handler async
+            serverProcess.on('exit', async (code, signal) => {
                 this.logger.log(`服务器 ${id} (${instance.name}) 进程已退出，退出码: ${code}, 信号: ${signal}`);
                 const serverInfo = this.runningServers.get(id);
+                // Stop log monitoring when process exits
+                await this.logParserService.stopMonitoringInstance(id);
                 if (serverInfo) {
-                    // Clear any pending RCON retry timeouts
+                    // RCON cleanup
                     if (serverInfo.rconRetryTimeout) {
                         clearTimeout(serverInfo.rconRetryTimeout);
-                        serverInfo.rconRetryTimeout = undefined; // Clear timeout ID
+                        serverInfo.rconRetryTimeout = undefined;
                     }
-                    // Attempt to close RCON connection if it exists
                     if (serverInfo.rcon) {
                         try {
-                            await serverInfo.rcon.close(); // Now correctly awaited
+                            await serverInfo.rcon.close();
                             this.logger.log(`RCON 连接已关闭 (服务器 ${id} 退出)`);
                         } catch (e: any) {
                             this.logger.warn(`关闭 RCON 连接时出错 (服务器 ${id} 退出): ${e.message}`);
@@ -560,38 +537,43 @@ Port=21114`; // Add a default port too
                     }
                     this.runningServers.delete(id);
                 }
-                 // Update DB state regardless of whether it was in runningServers map
-                 await this.updateServerRunningState(id, false);
-                 // Remove update stream when server stops
-                 const stream = this.updateStreams.get(id);
-                 if (stream) {
-                     stream.complete(); // Signal completion to subscribers
-                     this.updateStreams.delete(id);
-                 }
+                await this.updateServerRunningState(id, false);
+                const stream = this.updateStreams.get(id);
+                if (stream) {
+                    stream.complete();
+                    this.updateStreams.delete(id);
+                }
             });
 
-            serverProcess.on('error', (err) => {
+            serverProcess.on('error', async (err) => { // Make error handler async
                 this.logger.error(`启动服务器 ${id} (${instance.name}) 进程时出错: ${err.message}`);
-                // Clean up if process failed to start properly
+                // Stop monitoring on spawn error
+                await this.logParserService.stopMonitoringInstance(id);
                 this.runningServers.delete(id);
-                this.updateServerRunningState(id, false).catch(dbErr => this.logger.error(`Failed to update DB state after process error for server ${id}: ${dbErr}`));
-                 // Remove update stream on error
-                 const stream = this.updateStreams.get(id);
-                 if (stream) {
-                     stream.error(err); // Signal error to subscribers
-                     this.updateStreams.delete(id);
-                 }
+                await this.updateServerRunningState(id, false).catch(dbErr => this.logger.error(`Failed to update DB state after process error for server ${id}: ${dbErr}`));
+                const stream = this.updateStreams.get(id);
+                if (stream) {
+                    stream.error(err);
+                    this.updateStreams.delete(id);
+                }
             });
 
-            // Store the process and RCON info
+            // Store the process info AFTER listeners are attached
             this.runningServers.set(id, { process: serverProcess, instance, rcon: null, rconConnecting: false });
-            await this.updateServerRunningState(id, true);
+
+            // **重要：启动日志监控** (在服务器进程启动后)
+            // We pass the full instance object which logParserService needs
+            await this.logParserService.startMonitoringInstance(instance);
 
             // Attempt initial RCON connection after a short delay
             setTimeout(() => this.connectRcon(id), 5000); // Connect after 5s
 
         } catch (err: any) {
             this.logger.error(`启动服务器实例 ${id} 时发生内部错误: ${err.message}`);
+            // **重要：如果启动失败，确保数据库状态回滚为 false**
+            await this.updateServerRunningState(id, false).catch(dbErr => this.logger.error(`Failed to revert DB state after start error for server ${id}: ${dbErr}`));
+             // Also ensure monitoring is stopped if start fails mid-way
+            await this.logParserService.stopMonitoringInstance(id);
             throw new InternalServerErrorException(`启动服务器实例 ${id} 失败。`);
         }
     }
@@ -599,41 +581,48 @@ Port=21114`; // Add a default port too
     async stop(id: number): Promise<void> {
         const serverInfo = this.runningServers.get(id);
         if (!serverInfo) {
-            this.logger.warn(`尝试停止服务器 ${id}，但它不在运行中。`);
+            // If not in memory, check DB just in case
+            const instance = await this.serverInstanceRepository.findOneBy({ id });
+            if (instance && instance.isRunning) {
+                this.logger.warn(`服务器 ${id} 不在内存中，但数据库标记为运行中。尝试仅更新数据库状态并停止监控。`);
+                await this.updateServerRunningState(id, false);
+                await this.logParserService.stopMonitoringInstance(id); // Stop monitoring based on DB state
+            } else {
+                this.logger.warn(`尝试停止服务器 ${id}，但它不在运行中 (内存和数据库)。`);
+            }
             return;
         }
 
         this.logger.log(`尝试停止服务器实例 ${id} (${serverInfo.instance.name})...`);
 
-        // 更新数据库中服务器实例的运行状态
-        await this.updateServerRunningState(id, false);
-        this.logger.log(`已更新服务器 ${id} (${serverInfo.instance.name}) 状态为已停止`);
+        // **重要：先停止日志监控**
+        await this.logParserService.stopMonitoringInstance(id);
 
-        // 1. Disconnect RCON if connected
+        // Then update DB state
+        await this.updateServerRunningState(id, false);
+        this.logger.log(`已更新数据库中服务器 ${id} (${serverInfo.instance.name}) 状态为已停止`);
+
+        // ... (rest of the stop logic: RCON disconnect, process termination) ...
          if (serverInfo.rcon) {
              this.logger.log(`关闭 RCON 连接 (服务器 ${id})`);
              try {
-                await serverInfo.rcon.close();
+               await serverInfo.rcon.close();
              } catch (e: any) {
-                // Log error but continue stopping process
                  this.logger.warn(`停止服务器 ${id} 时关闭 RCON 连接失败: ${e.message}`);
              }
              serverInfo.rcon = null;
          }
-          // Clear any pending RCON retry timeouts
           if (serverInfo.rconRetryTimeout) {
               clearTimeout(serverInfo.rconRetryTimeout);
               serverInfo.rconRetryTimeout = undefined;
           }
 
-        // 2. Terminate the process
         if (!serverInfo.process || serverInfo.process.exitCode !== null || serverInfo.process.signalCode !== null) {
             this.logger.warn(`服务器 ${id} 进程信息无效或已退出，无法终止。`);
-            this.runningServers.delete(id); // Clean up map if process is invalid
+            this.runningServers.delete(id);
             return;
         }
 
-        // Check if PID exists before trying to kill
         const pid = serverInfo.process.pid;
         if (pid === undefined || pid === null) {
              this.logger.warn(`服务器 ${id} 进程 PID 无效，无法终止。`);
@@ -645,25 +634,18 @@ Port=21114`; // Add a default port too
         const isWindows = process.platform === 'win32';
         try {
             if (isWindows) {
-                // Forcefully kill the process and its children on Windows
                 spawn('taskkill', ['/pid', pid.toString(), '/f', '/t'], { stdio: 'ignore' });
             } else {
-                // Send SIGTERM first
-                 process.kill(pid, 'SIGTERM'); // Use process.kill for cross-platform signals
-                 // Optional: Add a timeout and then send SIGKILL if still alive
-                 // setTimeout(() => {
-                 //    try {
-                 //        process.kill(pid, 0); // Check if process exists
-                 //        this.logger.warn(`SIGTERM 超时，发送 SIGKILL 到服务器 ${id}`);
-                 //        process.kill(pid, 'SIGKILL');
-                 //    } catch (e) {
-                 //        // Process already exited
-                 //    }
-                 // }, 5000);
+                process.kill(pid, 'SIGTERM');
             }
         } catch (killError: any) {
              this.logger.error(`终止进程 ${id} (PID: ${pid}) 出错: ${killError.message}`);
+            // Even if kill fails, remove from running map as we intended to stop it
+            this.runningServers.delete(id);
         }
+
+        // Note: The 'exit' event handler on the process will also clean up runningServers map
+        // and updateStreams, ensuring eventual consistency.
     }
 
     private scheduleRconReconnect(id: number, delayMs: number): void {
@@ -691,208 +673,194 @@ Port=21114`; // Add a default port too
         const serverInfo = this.runningServers.get(id);
         if (!serverInfo || serverInfo.rcon || serverInfo.rconConnecting) {
             this.logger.debug(`跳过 RCON 连接尝试: ${!serverInfo ? '服务器信息不存在' : serverInfo.rcon ? '已连接' : '正在连接'}`);
+            return; // Already connected, connecting, or server stopped
+        }
+
+        const instance = serverInfo.instance; // Get instance data from map
+
+        // Fetch potential RCON config from Rcon.cfg first
+        let rconPort = instance.rconPort; // Default to DB value
+        let rconPassword = instance.rconPassword; // Default to DB value
+
+        try {
+            const rconConfigFromFile = await this.readRconConfigFromFile(instance.installPath);
+            if (rconConfigFromFile.port !== undefined) {
+                 this.logger.log(`从 Rcon.cfg 读取到端口: ${rconConfigFromFile.port}，将覆盖数据库值 ${instance.rconPort}`);
+                 rconPort = rconConfigFromFile.port;
+            }
+            if (rconConfigFromFile.password !== undefined) {
+                 this.logger.log(`从 Rcon.cfg 读取到密码，将覆盖数据库值`);
+                 rconPassword = rconConfigFromFile.password;
+            }
+        } catch (readErr: any) {
+            this.logger.warn(`读取 Rcon.cfg 失败 (服务器 ${id})，将使用数据库中的值: ${readErr.message}`);
+            // Continue with DB values if file read fails
+        }
+
+
+        if (!rconPassword || !rconPort) {
+            this.logger.warn(`RCON 密码或端口未配置 (服务器 ${id})`);
             return;
         }
 
-        const { instance } = serverInfo;
-        if (!instance.rconPassword || !instance.rconPort) {
-             this.logger.warn(`服务器 ${id} (${instance.name}) 缺少 RCON 密码或端口，无法连接。`);
-             return;
-        }
+        // Connect to localhost instead of non-existent ipAddress property
+        this.logger.log(`尝试连接 RCON 到 127.0.0.1:${rconPort} (服务器 ${id})`);
+        serverInfo.rconConnecting = true;
+        this.runningServers.set(id, serverInfo); // Update state
 
-        this.logger.log(`尝试连接到服务器 ${id} (${instance.name}) 的 RCON (localhost:${instance.rconPort})`);
-        serverInfo.rconConnecting = true; // Set connecting flag
-
-        let rcon: Rcon | null = null; // Declare rcon variable outside try block
-
+        let rcon: Rcon | null = null; // Define rcon variable outside try block
         try {
-            // Use squad-rcon constructor and init()
             rcon = new Rcon({
-                id: instance.id, // Use server instance ID or another unique ID if needed
-                host: '127.0.0.1', // Assuming localhost, adjust if needed
-                port: instance.rconPort,
-                password: instance.rconPassword,
-                pingDelay: 60000, // Default ping delay
-                autoReconnect: false, // Disable auto-reconnect, we handle it manually
-                logEnabled: true, // Enable logging from the library
-                // REMOVE the chatListeners block from here
-                // chatListeners: { ... }
+                id: instance.id, // Add the required instance ID
+                host: '127.0.0.1', // Use localhost directly
+                port: rconPort,
+                password: rconPassword,
+                autoReconnect: false, // We handle reconnect logic manually
+                // timeout: 30000, // Invalid option for this library version?
             });
 
-            // Setup standard event listeners AFTER creating the rcon instance
+            // Handle RCON events
             rcon.on('connected', () => {
-                 if (this.runningServers.has(id)) { // Check if server still exists
-                     this.logger.log(`成功连接到服务器 ${id} 的 RCON`);
-                     const currentServerInfo = this.runningServers.get(id);
-                     if (currentServerInfo) {
-                         currentServerInfo.rcon = rcon; // Assign the connected instance
-                         currentServerInfo.rconConnecting = false; // Clear connecting flag
-                         // Clear retry timeout if connection successful
-                         if (currentServerInfo.rconRetryTimeout) {
-                              clearTimeout(currentServerInfo.rconRetryTimeout);
-                              currentServerInfo.rconRetryTimeout = undefined;
-                         }
-                     } else {
-                         // Server was removed while connecting, close this connection
-                         rcon?.close().catch(e => this.logger.warn(`Closing orphaned RCON connection failed: ${e.message}`));
-                     }
-                 } else {
-                     // Server was removed before connection completed, close this connection
-                     this.logger.log(`Server ${id} removed before RCON could fully connect. Closing connection.`);
-                     rcon?.close().catch(e => this.logger.warn(`Closing orphaned RCON connection failed: ${e.message}`));
+                this.logger.log(`RCON 连接成功 (服务器 ${id})`);
+                const currentServerInfo = this.runningServers.get(id);
+                if (currentServerInfo) {
+                    currentServerInfo.rconConnecting = false;
+                     currentServerInfo.rcon = rcon; // Store the active RCON object
+                    this.runningServers.set(id, currentServerInfo);
+                } else {
+                    // Should not happen if connected, but handle gracefully
+                    this.logger.warn(`RCON 已连接，但服务器 ${id} 信息丢失，关闭连接。`);
+                    rcon?.close().catch(e => this.logger.error(`关闭无效 RCON 连接时出错: ${e.message}`));
+                }
+                // Refresh status after RCON connects
+                this.getStatus(id).catch(err => this.logger.error(`RCON 连接后获取状态失败 (服务器 ${id}): ${err.message}`));
+            });
+
+            rcon.on('error', (err: Error) => {
+                 this.logger.error(`RCON 错误 (服务器 ${id}): ${err.message}`);
+                 const currentServerInfo = this.runningServers.get(id);
+                 if (currentServerInfo) {
+                    currentServerInfo.rconConnecting = false;
+                    currentServerInfo.rcon = null; // Ensure rcon object is cleared
+                    this.runningServers.set(id, currentServerInfo);
                  }
+                 // Don't schedule reconnect on generic error immediately, let close handle it
             });
 
-            rcon.on('close', () => {
-                 this.logger.log(`RCON 连接已关闭 (服务器 ${id})`);
-                     if (this.runningServers.has(id)) {
-                     const currentServerInfo = this.runningServers.get(id);
-                     if (currentServerInfo && currentServerInfo.rcon === rcon) { // Ensure it's the same instance being closed
-                         currentServerInfo.rcon = null;
-                         currentServerInfo.rconConnecting = false; // Reset connecting flag
-                         // Schedule reconnect only if the server process is still running
-                         if (currentServerInfo.process && !currentServerInfo.process.killed) {
-                              this.scheduleRconReconnect(id, 15000); // Reconnect after 15s on close
-                         }
+            // Make the close handler async
+            rcon.on('close', async (hadError: boolean) => {
+                this.logger.log(`RCON 连接已关闭 (服务器 ${id})，是否有错误: ${hadError}`);
+                const currentServerInfo = this.runningServers.get(id);
+                if (currentServerInfo) {
+                     currentServerInfo.rconConnecting = false;
+                     currentServerInfo.rcon = null;
+                    this.runningServers.set(id, currentServerInfo);
+                    // Only schedule reconnect if the server process itself is still running
+                    if (currentServerInfo.process && currentServerInfo.process.exitCode === null) {
+                         this.scheduleRconReconnect(id, 10000); // Reconnect after 10s
                      }
                 }
             });
 
-            rcon.on('err', (error: Error) => {
-                this.logger.error(`RCON 连接错误 (服务器 ${id}): ${error.message}`);
-            if (this.runningServers.has(id)) {
-                    const currentServerInfo = this.runningServers.get(id);
-                    if (currentServerInfo) {
-                         currentServerInfo.rcon = null; // Clear potentially broken RCON instance
-                         currentServerInfo.rconConnecting = false; // Reset connecting flag
-                         this.scheduleRconReconnect(id, 30000); // Reconnect after 30s on error
-                    }
-                }
-            });
-
-            // Add listener for raw data if needed (e.g., for commands without specific emitters)
-            rcon.on('data', (data) => {
-                // this.logger.debug(`[RCON Data ${id}]: ${JSON.stringify(data)}`);
-            });
-
-            // ADD listeners for specific game events using the standard emitter pattern
+            // Restore complex CHAT_MESSAGE handling with ListPlayers lookup
             rcon.on('CHAT_MESSAGE', async (data: TChatMessage) => { // Make the handler async
-                // Log the raw data object to inspect its structure
-                this.logger.debug(`[Raw Chat Data]: ${JSON.stringify(data)}`); 
-
+                const currentServerInfo = this.runningServers.get(id);
+                if (!currentServerInfo || !currentServerInfo.rcon) { 
+                    // RCON disconnected before processing, or server info missing
+                    return; 
+                }
+                
                 let teamId = '?';
                 let squadId = '?';
                 let playerName = data.name.trim(); // Use name from chat data initially
+                const instance = currentServerInfo.instance; // Get instance for logging
 
                 // Fetch player list to get team/squad info (potential performance impact)
-                if (serverInfo && serverInfo.rcon) { // Ensure rcon is still connected
-                    try {
-                        this.logger.debug(`[Chat Info Fetch] Getting player list for ${data.steamID}`);
-                        const listPlayersResponse = await serverInfo.rcon.execute('ListPlayers');
-                        this.logger.debug(`[Chat Info Fetch] ListPlayers Response received`);
-                        
-                        // Parse the ListPlayers response (this requires knowing the exact format)
-                        // Assuming standard Squad format: "ID: <id> | Online IDs: EOS: <eosid> steam: <steamid> | Name: <name> | Team ID: <teamid> | Squad ID: <squadid> | Is Leader: <bool> | Role: <role>"
-                        const players = listPlayersResponse.split('\n');
-                        // Correct the key to lowercase 'steam:'
-                        const playerLine = players.find(p => p.includes(`steam: ${data.steamID}`)); 
-                        
-                        if (playerLine) {
-                            this.logger.debug(`[Chat Info Fetch] Found player line: ${playerLine}`);
-                            const teamMatch = playerLine.match(/Team ID: (\d+)/);
-                            const squadMatch = playerLine.match(/Squad ID: (\d+|None)/); // Squad ID can be 'None'
-                            const nameMatch = playerLine.match(/Name: (.*?)(?:\s+\||$)/); // Extract name again from ListPlayers if needed
+                try {
+                    this.logger.debug(`[Chat Info Fetch ${id}] Getting player list for ${data.steamID}`);
+                    const listPlayersResponse = await currentServerInfo.rcon.execute('ListPlayers');
+                    this.logger.debug(`[Chat Info Fetch ${id}] ListPlayers Response received`);
+                    
+                    // Parse the ListPlayers response
+                    const players = listPlayersResponse.split('\n');
+                    // Ensure we match the correct steam ID format
+                    const playerLine = players.find(p => p.includes(`steam: ${data.steamID}`)); 
+                    
+                    if (playerLine) {
+                        this.logger.debug(`[Chat Info Fetch ${id}] Found player line: ${playerLine}`);
+                        const teamMatch = playerLine.match(/Team ID: (\d+)/);
+                        const squadMatch = playerLine.match(/Squad ID: (\d+|None)/i); // Case-insensitive None
+                        const nameMatch = playerLine.match(/Name: (.*?)(?:\s+\||$)/); // Extract name again
 
-                            if (teamMatch) teamId = teamMatch[1];
-                            if (squadMatch) squadId = squadMatch[1] === 'None' ? '?' : squadMatch[1]; // Map 'None' to '?'
-                            if (nameMatch) playerName = nameMatch[1].trim(); // Update player name from ListPlayers if more accurate
-                            this.logger.debug(`[Chat Info Fetch] Parsed Info - Team: ${teamId}, Squad: ${squadId}, Name: ${playerName}`);
-                        } else {
-                            this.logger.warn(`[Chat Info Fetch] Player ${data.steamID} not found in ListPlayers response.`);
-                        }
-                    } catch (listPlayersError: any) {
-                        this.logger.error(`[Chat Info Fetch] Failed to get ListPlayers for team/squad info: ${listPlayersError.message}`);
-                        // Proceed without team/squad info if ListPlayers fails
+                        if (teamMatch) teamId = teamMatch[1];
+                        if (squadMatch) squadId = squadMatch[1].toLowerCase() === 'none' ? '?' : squadMatch[1]; // Map 'None' to '?'
+                        if (nameMatch) playerName = nameMatch[1].trim(); // Update player name from ListPlayers
+                        this.logger.debug(`[Chat Info Fetch ${id}] Parsed Info - Team: ${teamId}, Squad: ${squadId}, Name: ${playerName}`);
+                    } else {
+                        this.logger.warn(`[Chat Info Fetch ${id}] Player ${data.steamID} not found in ListPlayers response.`);
                     }
+                } catch (listPlayersError: any) {
+                    this.logger.error(`[Chat Info Fetch ${id}] Failed to get ListPlayers for team/squad info: ${listPlayersError.message}`);
+                    // Proceed without team/squad info if ListPlayers fails
                 }
 
-                // Format the log message to include the chat type AND team/squad info
+                // Format the log message
                 const chatPrefix = data.chat ? `[${data.chat}]` : '[UnknownChat]';
                 const teamSquadPrefix = `[T:${teamId} S:${squadId}]`;
-                const logMessage = `${chatPrefix} ${teamSquadPrefix} ${playerName} (${data.steamID}): ${data.message}`;
+                // Include timestamp from the event data
+                const logMessage = `[${data.time.toISOString()}] ${chatPrefix} ${teamSquadPrefix} ${playerName} (${data.steamID}): ${data.message}`;
                 
-                // Log to console with the new format
+                // Log to console (optional)
                 this.logger.log(`[RCON Chat ${id}] ${logMessage}`); 
                 
-                // Write to file with the new format
-                this.appendToChatLog(instance, logMessage).catch(err => {
-                     this.logger.error(`写入服务器 ${id} 的聊天日志时出错: ${err.message}`);
-                });
+                // Write to file
+                await this.appendToChatLog(instance, logMessage);
             });
+             
+            // Other RCON events (Warn, Kick, Ban etc.)
+           rcon.on('PLAYER_WARNED', async (data: TPlayerWarned) => {
+                const currentServerInfo = this.runningServers.get(id);
+                if (currentServerInfo) {
+                    // Final attempt: Check for nested steamID
+                    const steamId = (data as any).player?.steamID || (data as any).steamId || (data as any).steamID || 'UnknownSteamID';
+                    const message = `[${data.time.toISOString()}] [WARN] ${data.name} (${steamId}) 被警告: ${data.reason}`;
+                    await this.appendToChatLog(currentServerInfo.instance, message);
+                }
+           });
+           rcon.on('PLAYER_KICKED', async (data: TPlayerKicked) => {
+                const currentServerInfo = this.runningServers.get(id);
+                if (currentServerInfo) {
+                     // Removed reason based on linter error
+                    const message = `[${data.time.toISOString()}] [KICK] ${data.name} (${data.steamID}) 被踢出`;
+                    await this.appendToChatLog(currentServerInfo.instance, message);
+                    this.getStatus(id).catch(err => this.logger.error(`踢出玩家后获取状态失败 (服务器 ${id}): ${err.message}`));
+                }
+           });
+           rcon.on('PLAYER_BANNED', async (data: TPlayerBanned) => {
+                const currentServerInfo = this.runningServers.get(id);
+                if (currentServerInfo) {
+                    // Use name, removed reason and duration based on linter errors
+                    const message = `[${data.time.toISOString()}] [BAN] ${data.name} (${data.steamID}) 被封禁`;
+                    await this.appendToChatLog(currentServerInfo.instance, message);
+                    this.getStatus(id).catch(err => this.logger.error(`封禁玩家后获取状态失败 (服务器 ${id}): ${err.message}`));
+                }
+           });
 
-            rcon.on('PLAYER_WARNED', (data: TPlayerWarned) => {
-                 const logMessage = `Player Warned: ${JSON.stringify(data)}`;
-                 this.logger.log(`[RCON Warn ${id}] ${logMessage}`);
-                 this.appendToChatLog(instance, logMessage).catch(err => {
-                     this.logger.error(`写入服务器 ${id} 的警告日志时出错: ${err.message}`);
-                 });
-            });
-
-            rcon.on('PLAYER_KICKED', (data: TPlayerKicked) => {
-                 const logMessage = `Player Kicked: ${JSON.stringify(data)}`;
-                 this.logger.log(`[RCON Kick ${id}] ${logMessage}`);
-                 this.appendToChatLog(instance, logMessage).catch(err => {
-                      this.logger.error(`写入服务器 ${id} 的踢出日志时出错: ${err.message}`);
-                 });
-            });
-
-            rcon.on('PLAYER_BANNED', (data: TPlayerBanned) => {
-                 const logMessage = `Player Banned: ${JSON.stringify(data)}`;
-                 this.logger.log(`[RCON Ban ${id}] ${logMessage}`);
-                 this.appendToChatLog(instance, logMessage).catch(err => {
-                      this.logger.error(`写入服务器 ${id} 的封禁日志时出错: ${err.message}`);
-                 });
-            });
-
-            rcon.on('SQUAD_CREATED', (data: TSquadCreated) => {
-                 const logMessage = `Squad Created: ${JSON.stringify(data)}`;
-                 this.logger.log(`[RCON Squad ${id}] ${logMessage}`);
-                 this.appendToChatLog(instance, logMessage).catch(err => {
-                      this.logger.error(`写入服务器 ${id} 的小队日志时出错: ${err.message}`);
-                 });
-            });
-
-            rcon.on('POSSESSED_ADMIN_CAMERA', (data: TPossessedAdminCamera) => {
-                const logMessage = `Admin Camera Possessed: ${JSON.stringify(data)}`;
-                 this.logger.log(`[RCON AdminCam ${id}] ${logMessage}`);
-                 this.appendToChatLog(instance, logMessage).catch(err => {
-                      this.logger.error(`写入服务器 ${id} 的管理员摄像机日志时出错: ${err.message}`);
-                 });
-            });
-
-            rcon.on('UNPOSSESSED_ADMIN_CAMERA', (data: TUnPossessedAdminCamera) => {
-                const logMessage = `Admin Camera Unpossessed: ${JSON.stringify(data)}`;
-                 this.logger.log(`[RCON AdminCam ${id}] ${logMessage}`);
-                 this.appendToChatLog(instance, logMessage).catch(err => {
-                      this.logger.error(`写入服务器 ${id} 的管理员摄像机日志时出错: ${err.message}`);
-                 });
-            });
-
-            // Now initialize the connection
+            // Use init() instead of connect()
             await rcon.init();
 
-        } catch (error: any) {
-             this.logger.error(`初始化 RCON 连接失败 (服务器 ${id}): ${error.message}`);
-             if (rcon) {
-                 // Attempt cleanup if instance was created but init failed
-                 await rcon.close().catch(e => this.logger.warn(`Closing failed RCON connection failed: ${e.message}`));
-             }
-             const currentServerInfo = this.runningServers.get(id);
-             if (currentServerInfo) {
-                 currentServerInfo.rcon = null;
-                 currentServerInfo.rconConnecting = false; // Reset connecting flag
-                 this.scheduleRconReconnect(id, 60000); // Reconnect after 60s on initial connection failure
-             }
+        } catch (err: any) {
+            this.logger.error(`连接 RCON 失败 (服务器 ${id}): ${err.message}`);
+            const currentServerInfo = this.runningServers.get(id);
+            if (currentServerInfo) {
+                currentServerInfo.rconConnecting = false;
+                currentServerInfo.rcon = null; // Ensure rcon object is null
+                this.runningServers.set(id, currentServerInfo);
+                // Schedule reconnect on connection failure if server process is alive
+                 if (currentServerInfo.process && currentServerInfo.process.exitCode === null) {
+                    this.scheduleRconReconnect(id, 15000); // Retry after 15s on initial connection failure
+                 }
+            }
         }
     }
 
@@ -1973,8 +1941,8 @@ Port=21114`; // Add a default port too
             await fs.mkdir(dirPath, { recursive: true });
             this.logger.debug(`[Chat Log Attempt] Directory ensured/exists: ${dirPath}`);
 
-            const timestamp = new Date().toISOString();
-            const logLine = `[${timestamp}] ${message}${os.EOL}`;
+            // 消息本身已经包含时间戳，不需要再添加一次
+            const logLine = `${message}${os.EOL}`;
             this.logger.debug(`[Chat Log Attempt] Appending to file: ${logPath}`);
             await fs.appendFile(logPath, logLine, 'utf-8');
             this.logger.debug(`[Chat Log Success] Appended to file: ${logPath}`);

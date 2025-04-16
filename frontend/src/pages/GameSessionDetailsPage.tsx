@@ -1618,7 +1618,7 @@ hasSquad值: ${player.hasSquad}
                 )}
               </div>
               
-              <div className="flex space-x-2">
+              <div className="flex flex-nowrap space-x-2">
                 <FluentInput
                   type="text"
                   placeholder="输入RCON命令..."
@@ -1633,6 +1633,7 @@ hasSquad值: ${player.hasSquad}
                   icon={<LuSend />}
                   onClick={handleSendCommand}
                   disabled={!rconCommand.trim() || !server.rconEnabled || serverStatus?.rconStatus !== 'Connected' || sendingCommand}
+                  className="whitespace-nowrap min-w-[90px] h-[46px] flex items-center"
                 >
                   {sendingCommand ? '发送中...' : '发送'}
                 </FluentButton>

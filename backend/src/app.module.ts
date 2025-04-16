@@ -6,23 +6,16 @@ import { ServeStaticModule } from '@nestjs/serve-static';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ServerInstanceModule } from './server-instance/server-instance.module';
-import { ServerInstance } from './server-instance/entities/server-instance.entity';
 import { join } from 'path';
 import { DeploymentModule } from './deployment/deployment.module';
 import { UserModule } from './user/user.module';
 import { AuthModule } from './auth/auth.module';
-import { User } from './user/entities/user.entity';
 import { PermissionModule } from './permission/permission.module';
 import { RoleModule } from './role/role.module';
-import { Permission } from './permission/entities/permission.entity';
-import { Role } from './role/entities/role.entity';
 import { SeedModule } from './seed/seed.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './permission/guards/permissions.guard';
 import { SharedModule } from './shared/shared.module';
-import { DatabaseModule } from './database/database.module';
-import { WebsocketModule } from './websocket/websocket.module';
-import { SettingsModule } from './settings/settings.module';
 import { LogParserModule } from './log-parser/log-parser.module';
 
 @Module({
@@ -34,14 +27,11 @@ import { LogParserModule } from './log-parser/log-parser.module';
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
-        type: 'postgres',
-        host: configService.get<string>('DB_HOST', 'localhost'),
-        port: configService.get<number>('DB_PORT', 5432),
-        username: configService.get<string>('DB_USERNAME', 'postgres'),
-        password: configService.get<string>('DB_PASSWORD', 'password'),
-        database: configService.get<string>('DB_DATABASE', 'sqsmanager'),
+        type: 'sqlite',
+        database: join(__dirname, '..', 'data', 'manager.db'),
         entities: [join(__dirname, '**', '*.entity.{ts,js}')],
-        synchronize: configService.get<string>('NODE_ENV') !== 'production',
+        synchronize: true,
+        autoLoadEntities: true,
       }),
       inject: [ConfigService],
     }),
@@ -57,9 +47,6 @@ import { LogParserModule } from './log-parser/log-parser.module';
     PermissionModule,
     RoleModule,
     SeedModule,
-    DatabaseModule,
-    WebsocketModule,
-    SettingsModule,
     LogParserModule,
   ],
   controllers: [AppController],
