@@ -19,7 +19,7 @@ import LoadingSpinner from '../components/ui/LoadingSpinner';
 import FluentTable from '../components/ui/FluentTable';
 import FluentRow from '../components/ui/FluentRow';
 import BanList from '../components/BanList';
-import { LuRefreshCw, LuArrowLeft, LuSend, LuTrash, LuUserX, LuToggleLeft, LuToggleRight, LuSettings, LuX, LuTriangle, LuUsers, LuArrowRightLeft, LuRotateCw, LuMap, LuMapPin, LuMessagesSquare } from "react-icons/lu";
+import { LuRefreshCw, LuArrowLeft, LuSend, LuTrash, LuUserX, LuToggleLeft, LuToggleRight, LuSettings, LuX, LuTriangle, LuUsers, LuArrowRightLeft, LuRotateCw, LuMap, LuMapPin } from "react-icons/lu";
 import { BanEntry } from '../types/ban';
 
 // 玩家接口
@@ -267,8 +267,6 @@ function GameSessionDetailsPage() {
   const [isPermanentBan, setIsPermanentBan] = useState(false);
   // 添加封禁时长选择
   const [banLength, setBanLength] = useState('7d'); // 默认7天
-  // 日期选择保留用于自定义时长
-  const [banEndDate, setBanEndDate] = useState<string>('');
   const [isBanning, setIsBanning] = useState(false);
   
   // 警告玩家
@@ -305,7 +303,6 @@ function GameSessionDetailsPage() {
   const [manualBanEosId, setManualBanEosId] = useState('');
   const [manualBanReason, setManualBanReason] = useState('');
   const [manualBanIsPermanent, setManualBanIsPermanent] = useState(false);
-  const [manualBanLength, setManualBanLength] = useState('7d'); // 默认7天
   const [manualBanExpirationDate, setManualBanExpirationDate] = useState('');
   const [isAddingBan, setIsAddingBan] = useState(false);
   
@@ -570,10 +567,7 @@ hasSquad值: ${player.hasSquad}
     setBanReason("");
     // 设置默认为永久封禁，然后设置永久封禁标志
     setIsPermanentBan(true);
-    // 设置默认结束日期为7天后（用于非永久封禁情况）
-    const defaultEndDate = new Date();
-    defaultEndDate.setDate(defaultEndDate.getDate() + 7);
-    setBanEndDate(defaultEndDate.toISOString().split('T')[0]);
+    // 默认结束日期不再需要设置
     
     setBanModalOpen(true);
   };
@@ -1103,7 +1097,6 @@ hasSquad值: ${player.hasSquad}
       setManualBanEosId('');
       setManualBanReason('');
       setManualBanIsPermanent(false);
-      setManualBanLength('7d');
       setManualBanExpirationDate('');
       
       // 刷新Ban列表
@@ -1125,7 +1118,6 @@ hasSquad值: ${player.hasSquad}
     setManualBanEosId('');
     setManualBanReason('');
     setManualBanIsPermanent(false); // 默认不是永久封禁
-    setManualBanLength('7d'); // 默认7天
     setManualBanExpirationDate('');
     
     setManualBanModalOpen(true);
@@ -1261,7 +1253,7 @@ hasSquad值: ${player.hasSquad}
   ];
 
   // Filter tabs based on permissions or server state
-  const availableTabs = tabs.filter(tab => {
+  const availableTabs = tabs.filter(() => {
     // You might add more conditions here if needed
     return true;
   });
