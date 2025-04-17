@@ -370,17 +370,35 @@ Port=21114`; // Add a default port too
         const newInstance = this.serverInstanceRepository.create(createServerInstanceDto);
         newInstance.isRunning = false; // Ensure new instances start as not running
         
+        let savedInstance: ServerInstance; // Declare variable to hold the saved instance
+
         try {
-            await this.serverInstanceRepository.save(newInstance);
-            this.logger.log(`服务器实例 '${newInstance.name}' (ID: ${newInstance.id}) 创建成功。`);
-            return newInstance;
-        } catch (err: any) {
-             this.logger.error(`创建服务器实例 '${createServerInstanceDto.name}' 失败: ${err.message}`);
+            // 保存到 SQSManager 数据库
+            savedInstance = await this.serverInstanceRepository.save(newInstance);
+            this.logger.log(`服务器实例 '${savedInstance.name}' (ID: ${savedInstance.id}) 记录已成功创建。`);
+
+            // --- 新增：在数据库记录创建成功后，尝试写入 Rcon.cfg ---
+            this.logger.log(`尝试将 RCON 配置写入 ${savedInstance.installPath}/SquadGame/ServerConfig/Rcon.cfg`);
+            try {
+                await this._updateRconConfigFileContent(savedInstance.installPath, {
+                    password: savedInstance.rconPassword, // 使用已保存实例的密码
+                    port: savedInstance.rconPort,         // 使用已保存实例的端口
+                });
+                this.logger.log(`成功将 RCON 配置写入 Rcon.cfg 文件 (ID: ${savedInstance.id})。`);
+            } catch (writeErr: any) {
+                // 如果写入失败，记录警告但**不**抛出异常，因为数据库记录已创建
+                this.logger.warn(`服务器实例记录已创建，但写入 Rcon.cfg 文件失败 (ID: ${savedInstance.id})。请检查文件权限或手动配置。错误: ${writeErr.message}`);
+            }
+            // --- 写入结束 ---
+
+            return savedInstance; // 返回创建的实例信息
+        } catch (dbErr: any) {
+             this.logger.error(`创建服务器实例 '${createServerInstanceDto.name}' 失败: ${dbErr.message}`);
             // Handle potential unique constraint violations etc.
-            if (err.code === '23505') { // Example for PostgreSQL unique violation
+            if (dbErr.code === '23505') { // Example for PostgreSQL unique violation
                 throw new ConflictException(`名称为 '${createServerInstanceDto.name}' 的服务器实例已存在。`);
             }
-             throw new InternalServerErrorException(`创建服务器实例时数据库出错: ${err.message}`);
+             throw new InternalServerErrorException(`创建服务器实例时数据库出错: ${dbErr.message}`);
         }
     }
 

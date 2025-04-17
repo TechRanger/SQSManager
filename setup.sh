@@ -11,7 +11,7 @@ NC='\033[0m' # No Color
 INSTALL_DIR="/opt/sqsmanager"
 SQS_USER="sqsmanager"
 SQS_SERVERS_DIR="/home/$SQS_USER/servers"
-BITBUCKET_URL="https://bitbucket.org/michaelcode/sqsmanager/downloads"
+BITBUCKET_URL="https://bitbucket.org/sqsm/sqsmanager/downloads"
 
 # 通用函数
 log_info() {
@@ -97,62 +97,125 @@ EOF
 install_docker() {
     # 检查 Docker 是否已安装
     if ! command -v docker &> /dev/null; then
-        log_warn "Docker 未安装，正在安装..."
-        
-        # 添加 Docker 官方 GPG 密钥
+        log_warn "Docker 未安装，正在安装 (使用清华镜像源)..."
+
+        # 1. 移除旧版本 (来自清华文档)
+        log_info "移除旧的 Docker 相关软件包（如果存在）..."
+        for pkg in docker.io docker-doc docker-compose podman-docker containerd runc; do
+            apt-get remove -y $pkg > /dev/null 2>&1 || log_warn "移除 $pkg 时出错或未找到 $pkg"
+        done
+
+        # 2. 添加 Docker 官方 GPG 密钥 (优先尝试官方源，失败则尝试阿里云)
+        log_info "添加 Docker GPG 密钥..."
         install -m 0755 -d /etc/apt/keyrings
+        # 清理可能存在的旧密钥文件
+        rm -f /etc/apt/keyrings/docker.gpg
         curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        if [ $? -ne 0 ] || [ ! -s /etc/apt/keyrings/docker.gpg ]; then
+            log_error "从官方源下载或处理 Docker GPG 密钥失败。请检查网络连接。"
+            log_warn "尝试从备用源下载 GPG 密钥 (aliyun)..."
+            curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+            if [ $? -ne 0 ] || [ ! -s /etc/apt/keyrings/docker.gpg ]; then
+                 log_error "从备用源下载 GPG 密钥也失败了。请手动检查网络和 GPG 环境。"
+                 return 1 # 退出函数
+            fi
+            log_info "已成功从备用源 (aliyun) 获取 GPG 密钥。"
+        fi
         chmod a+r /etc/apt/keyrings/docker.gpg
-        
-        # 添加 Docker 软件源
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-        
-        # 安装 Docker
+
+        # 3. 添加 Docker 软件源 (使用清华镜像)
+        log_info "添加 Docker APT 软件源 (使用清华镜像)..."
+        echo \
+          "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/ubuntu \
+          $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+        # 4. 安装 Docker CE (包含 compose plugin)
+        log_info "更新软件包列表并安装 Docker CE..."
         apt-get update
-        apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin
-        
-        # 启动 Docker 服务
+        # 添加重试逻辑以应对可能的瞬时网络问题
+        INSTALL_CMD="apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
+        if ! $INSTALL_CMD; then
+            log_warn "首次安装 Docker CE 失败，等待5秒后重试..."
+            sleep 5
+            apt-get update # 再次更新列表以防万一
+            if ! $INSTALL_CMD; then
+                log_error "安装 Docker CE 软件包失败。请检查 APT 源和网络连接。"
+                return 1 # 退出函数
+            fi
+        fi
+
+        # 5. 启动 Docker 服务
+        log_info "启动 Docker 服务..."
         systemctl enable docker
         systemctl start docker
-        
-        log_info "Docker 安装完成"
+        # 检查服务状态
+        if ! systemctl is-active --quiet docker; then
+            log_error "Docker 服务未能成功启动。请检查 'systemctl status docker' 和 'journalctl -xeu docker.service' 获取详细信息。"
+            return 1
+        fi
+
+        log_info "Docker 安装完成 (使用清华镜像)"
     else
         log_info "Docker 已安装"
     fi
+    return 0 # 成功
 }
 
-# 安装 Docker Compose
+# 安装/检查 Docker Compose
 install_docker_compose() {
-    # 检查 Docker Compose 是否已安装
-    if ! command -v docker-compose &> /dev/null && ! command -v docker &> /dev/null; then
-        log_warn "Docker Compose 未安装，正在安装..."
-        
-        # 安装 Docker Compose
-        apt-get update
-        apt-get install -y docker-compose-plugin
-        
-        # 为了兼容性创建一个 docker-compose 命令的软链接
-        ln -sf /usr/libexec/docker/cli-plugins/docker-compose /usr/local/bin/docker-compose
-        chmod +x /usr/local/bin/docker-compose
-        
-        log_info "Docker Compose 安装完成"
-    else
-        log_info "Docker Compose 已安装"
-    fi
-    
-    # 检测Docker Compose版本
-    log_warn "检测Docker Compose版本..."
-    COMPOSE_VERSION=$(docker-compose --version 2>/dev/null || docker compose version 2>/dev/null)
-    log_info "检测到: ${COMPOSE_VERSION}"
-    
-    # 确定使用哪种Docker Compose命令格式
-    if docker compose version &>/dev/null; then
-        log_info "使用Docker Compose V2格式命令"
+    # 检查 Docker Compose 命令是否可用 (优先 V2 plugin)
+    if command -v docker &> /dev/null && docker compose version &>/dev/null; then
+        log_info "Docker Compose V2 (plugin) 已检测到"
         COMPOSE_CMD="docker compose"
+        # 确保兼容性软链接存在 (如果需要旧脚本)
+        if [ ! -x /usr/local/bin/docker-compose ]; then
+             # V2 plugin 通常安装到 /usr/libexec/docker/cli-plugins/docker-compose
+             if [ -x /usr/libexec/docker/cli-plugins/docker-compose ]; then
+                 ln -sf /usr/libexec/docker/cli-plugins/docker-compose /usr/local/bin/docker-compose || log_warn "创建 docker-compose 兼容性链接失败"
+                 chmod +x /usr/local/bin/docker-compose || log_warn "设置 docker-compose 兼容性链接权限失败"
+             else
+                 log_warn "未找到 docker compose 插件执行文件，无法创建兼容链接。"
+             fi
+        fi
+    # 检查旧的 V1 standalone 版本
+    elif command -v docker-compose &> /dev/null; then
+         log_info "Docker Compose V1 (standalone) 已检测到"
+         COMPOSE_CMD="docker-compose"
+    # 如果两者都找不到，尝试安装 V2 plugin (可能 install_docker 失败了)
     else
-        log_info "使用Docker Compose V1格式命令"
-        COMPOSE_CMD="docker-compose"
+        log_error "未检测到 Docker Compose 命令 (V1 或 V2 plugin)。"
+        if command -v apt-get &> /dev/null; then
+             log_warn "尝试安装 docker-compose-plugin..."
+             apt-get update
+             apt-get install -y docker-compose-plugin
+             if docker compose version &>/dev/null; then
+                 log_info "Docker Compose V2 (plugin) 安装成功"
+                 COMPOSE_CMD="docker compose"
+                 if [ ! -x /usr/local/bin/docker-compose ]; then
+                     if [ -x /usr/libexec/docker/cli-plugins/docker-compose ]; then
+                         ln -sf /usr/libexec/docker/cli-plugins/docker-compose /usr/local/bin/docker-compose || log_warn "创建 docker-compose 兼容性链接失败"
+                         chmod +x /usr/local/bin/docker-compose || log_warn "设置 docker-compose 兼容性链接权限失败"
+                     else
+                        log_warn "未找到 docker compose 插件执行文件，无法创建兼容链接。"
+                     fi
+                 fi
+             else
+                 log_error "安装 docker-compose-plugin 后仍无法检测到。请检查 Docker 安装。"
+                 return 1
+             fi
+        else
+            log_error "系统非 Debian/Ubuntu，无法自动安装 docker-compose-plugin。"
+            return 1
+        fi
     fi
+
+    # 检测并报告版本
+    log_warn "检测 Docker Compose 版本..."
+    # 使用 eval 来执行包含空格的命令
+    COMPOSE_VERSION=$(eval $COMPOSE_CMD version 2>/dev/null)
+    log_info "检测到版本: ${COMPOSE_VERSION:-未知或错误}"
+
+    return 0
 }
 
 # 设置用户和目录
@@ -245,6 +308,7 @@ install_sqsmanager() {
     cd $INSTALL_DIR
     
     log_warn "检查当前服务状态..."
+    # 检查是否有服务正在运行
     if $COMPOSE_CMD -f "$INSTALL_DIR/docker-compose.yml" ps -q 2>/dev/null | grep -q .; then
         log_warn "检测到正在运行的服务，正在停止..."
         $COMPOSE_CMD -f "$INSTALL_DIR/docker-compose.yml" down || log_warn "停止服务失败，可能服务已停止。继续执行..."
@@ -298,61 +362,78 @@ backup_data() {
     log_warn "创建数据备份..."
     
     # 确保数据卷存在
-    VOLUME_NAME=$(docker volume ls | grep sqsmanager_backend_data | awk '{print $2}')
-    if [ -z "$VOLUME_NAME" ]; then
-        log_warn "尝试启动应用以创建卷..."
-        $COMPOSE_CMD -f "$INSTALL_DIR/docker-compose.yml" up -d
-        sleep 5
-        $COMPOSE_CMD -f "$INSTALL_DIR/docker-compose.yml" down
-        VOLUME_NAME=$(docker volume ls | grep sqsmanager_backend_data | awk '{print $2}')
-        if [ -z "$VOLUME_NAME" ]; then
-            log_error "找不到数据卷，可能尚未创建"
+    # 注意：卷名在 docker-compose.yml 中定义为 backend_data，Compose 会自动添加项目名前缀
+    PROJECT_NAME=$(basename "$INSTALL_DIR") # 假设项目名是安装目录名
+    VOLUME_NAME="${PROJECT_NAME}_backend_data"
+    
+    # 检查实际的卷名
+    ACTUAL_VOLUME_NAME=$(docker volume ls --format '{{.Name}}' | grep "backend_data$" | head -n 1)
+    
+    if [ -z "$ACTUAL_VOLUME_NAME" ]; then
+        log_warn "未找到数据卷，尝试启动应用以创建卷..."
+        $COMPOSE_CMD -f "$INSTALL_DIR/docker-compose.yml" up -d backend # 只启动后端以创建卷
+        sleep 10 # 等待卷创建
+        $COMPOSE_CMD -f "$INSTALL_DIR/docker-compose.yml" stop backend # 停止后端
+        ACTUAL_VOLUME_NAME=$(docker volume ls --format '{{.Name}}' | grep "backend_data$" | head -n 1)
+        if [ -z "$ACTUAL_VOLUME_NAME" ]; then
+            log_error "找不到数据卷 (${PROJECT_NAME}_backend_data 或类似名称)，无法备份。"
             return 1
         fi
     fi
     
-    # 备份数据卷
-    docker run --rm -v $VOLUME_NAME:/data -v $BACKUP_DIR:/backup alpine tar czf /backup/data.tar.gz -C /data .
+    log_info "找到数据卷: $ACTUAL_VOLUME_NAME"
+    
+    # 临时文件名
+    TEMP_DATA_BACKUP="$BACKUP_DIR/data_$(date +%s).tar.gz"
+    TEMP_ENV_BACKUP="$BACKUP_DIR/.env_$(date +%s)"
+    
+    # 备份数据卷内容
+    log_info "正在备份卷 $ACTUAL_VOLUME_NAME 到 $TEMP_DATA_BACKUP ..."
+    docker run --rm -v "$ACTUAL_VOLUME_NAME:/data" -v "$BACKUP_DIR:/backup" alpine tar czf "/backup/$(basename $TEMP_DATA_BACKUP)" -C /data . || {
+        log_error "备份数据卷时出错。"
+        rm -f "$TEMP_DATA_BACKUP" # 清理临时文件
+        return 1
+    }
     
     # 备份环境文件
-    cp $INSTALL_DIR/.env $BACKUP_DIR/.env
+    if [ -f "$INSTALL_DIR/.env" ]; then
+        log_info "正在备份 .env 文件..."
+        cp "$INSTALL_DIR/.env" "$TEMP_ENV_BACKUP"
+    else
+        log_warn ".env 文件不存在，备份中将不包含此文件。"
+        TEMP_ENV_BACKUP=""
+    fi
     
     # 打包所有备份
-    tar -czf $BACKUP_FILE -C $BACKUP_DIR data.tar.gz .env
-    rm $BACKUP_DIR/data.tar.gz $BACKUP_DIR/.env
+    log_info "正在打包最终备份文件 $BACKUP_FILE ..."
+    if [ -n "$TEMP_ENV_BACKUP" ] && [ -f "$TEMP_ENV_BACKUP" ]; then
+        tar -czf "$BACKUP_FILE" -C "$BACKUP_DIR" "$(basename $TEMP_DATA_BACKUP)" "$(basename $TEMP_ENV_BACKUP)" || {
+            log_error "创建最终备份压缩包失败。"
+            rm -f "$TEMP_DATA_BACKUP" "$TEMP_ENV_BACKUP"
+            return 1
+        }
+        rm -f "$TEMP_DATA_BACKUP" "$TEMP_ENV_BACKUP" # 清理临时文件
+    elif [ -f "$TEMP_DATA_BACKUP" ]; then
+         tar -czf "$BACKUP_FILE" -C "$BACKUP_DIR" "$(basename $TEMP_DATA_BACKUP)" || {
+             log_error "创建最终备份压缩包失败 (仅含数据)。"
+             rm -f "$TEMP_DATA_BACKUP"
+             return 1
+         }
+         rm -f "$TEMP_DATA_BACKUP"
+    else
+        log_error "没有找到可打包的备份文件。"
+        return 1
+    fi
     
     log_info "备份已创建: $BACKUP_FILE"
+    return 0
 }
 
 # 重置密码
 reset_password() {
-    log_warn "重置管理员密码功能即将推出..."
-    log_info "目前请通过应用内的用户管理功能重置密码"
+    log_warn "重置管理员密码功能尚未实现。"
+    log_info "目前请通过应用内的用户管理功能或联系支持重置密码。"
 }
-
-# Configure sysctl for ICMP ping range
-echo "Configuring net.ipv4.ping_group_range..."
-
-# Check if the line already exists
-if sudo grep -q "^net.ipv4.ping_group_range" /etc/sysctl.conf; then
-    # Line exists, modify it
-    sudo sed -i 's/^net\\.ipv4\\.ping_group_range.*/net.ipv4.ping_group_range = 0 65535/' /etc/sysctl.conf
-    echo "Modified existing net.ipv4.ping_group_range setting in /etc/sysctl.conf"
-else
-    # Line does not exist, append it
-    echo "net.ipv4.ping_group_range = 0 65535" | sudo tee -a /etc/sysctl.conf > /dev/null
-    echo "Appended net.ipv4.ping_group_range setting to /etc/sysctl.conf"
-fi
-
-# Apply the changes immediately
-echo "Applying sysctl changes..."
-if sudo sysctl -p; then
-    echo "Sysctl changes applied successfully."
-else
-    echo "Failed to apply sysctl changes. Please check /etc/sysctl.conf" >&2
-fi
-
-echo "ICMP ping range configuration complete."
 
 # 主函数
 main() {
@@ -380,19 +461,42 @@ main() {
     # 安装依赖
     install_dependencies
     
-    # 安装Docker
-    install_docker
+    # --- BEGIN: 配置 sysctl for ICMP ping range --- 
+    log_warn "配置内核参数以允许 ICMP ping..."
+    # Check if the line already exists
+    if grep -q "^net.ipv4.ping_group_range" /etc/sysctl.conf; then
+        # Line exists, modify it
+        sed -i 's/^net\.ipv4\.ping_group_range.*/net.ipv4.ping_group_range = 0 65535/' /etc/sysctl.conf
+        log_info "已修改 /etc/sysctl.conf 中的 net.ipv4.ping_group_range 设置"
+    else
+        # Line does not exist, append it
+        echo "net.ipv4.ping_group_range = 0 65535" | tee -a /etc/sysctl.conf > /dev/null
+        log_info "已将 net.ipv4.ping_group_range 设置追加到 /etc/sysctl.conf"
+    fi
+    # Apply the changes immediately
+    log_info "应用 sysctl 更改..."
+    if sysctl -p; then
+        log_info "Sysctl 更改已成功应用。"
+    else
+        log_error "应用 sysctl 更改失败。请检查 /etc/sysctl.conf 文件。"
+        # 这里可以选择退出脚本或仅警告
+        # exit 1 
+    fi
+    # --- END: 配置 sysctl for ICMP ping range --- 
     
-    # 安装Docker Compose
-    install_docker_compose
+    # 安装/检查 Docker
+    install_docker || exit 1 # 如果Docker安装失败则退出
+    
+    # 安装/检查 Docker Compose
+    install_docker_compose || exit 1 # 如果Compose检查/安装失败则退出
     
     # 设置用户和目录
-    setup_user_and_dirs
+    setup_user_and_dirs || exit 1
     
-    # 下载配置文件
-    download_config_files
+    # 下载配置文件 (如果需要)
+    download_config_files || exit 1
     
-    # 询问用户操作
+    # --- 菜单逻辑 --- 
     echo ""
     log_warn "请选择操作:"
     echo "1) 安装/更新 SQSManager"
@@ -400,8 +504,10 @@ main() {
     echo "3) 停止 SQSManager"
     echo "4) 查看日志"
     echo "5) 备份数据"
-    echo "6) 重置管理员密码"
+    echo "6) 重置管理员密码 (未实现)"
     echo "7) 退出"
+    
+    # 尝试从 /dev/tty 读取，避免被管道输入影响
     read -p "请输入选项 [1-7]: " choice < /dev/tty
     
     case $choice in
@@ -412,7 +518,7 @@ main() {
         5) backup_data ;;
         6) reset_password ;;
         7) 
-            log_info "感谢使用 SQSManager 安装工具"
+            log_info "感谢使用 SQSManager 安装管理工具"
             exit 0
             ;;
         *)
@@ -428,4 +534,4 @@ main() {
 }
 
 # 执行主函数
-main
+main "$@"
