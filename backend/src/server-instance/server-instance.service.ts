@@ -5,7 +5,7 @@ import { CreateServerInstanceDto } from './dto/create-server-instance.dto';
 import { UpdateServerInstanceDto } from './dto/update-server-instance.dto';
 import { ServerInstance } from './entities/server-instance.entity';
 import { spawn, ChildProcess } from 'child_process';
-import { Rcon, TChatMessage, TPlayerWarned, TPlayerKicked, TPlayerBanned, TSquadCreated, TPossessedAdminCamera, TUnPossessedAdminCamera } from 'squad-rcon';
+import type { Rcon, TChatMessage, TPlayerWarned, TPlayerKicked, TPlayerBanned, TSquadCreated, TPossessedAdminCamera, TUnPossessedAdminCamera } from 'squad-rcon';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import * as ini from 'ini';
@@ -667,79 +667,75 @@ Port=21114`; // Add a default port too
     }
 
     private scheduleRconReconnect(id: number, delayMs: number): void {
+        this.logger.debug(`计划在 ${delayMs}ms 后为服务器 ${id} 重新连接 RCON`);
         const serverInfo = this.runningServers.get(id);
-        if (!serverInfo || serverInfo.rconConnecting || serverInfo.rcon) {
-            return; // Don't schedule if already connecting, connected, or server stopped
-        }
+        if (!serverInfo) return;
 
-        // Clear existing timer if any
+        // 清除现有的定时器以防重复
         if (serverInfo.rconRetryTimeout) {
             clearTimeout(serverInfo.rconRetryTimeout);
         }
 
-        this.logger.log(`安排 ${delayMs / 1000} 秒后重新连接 RCON 到服务器 ${id}`);
-        serverInfo.rconRetryTimeout = setTimeout(() => {
-             serverInfo.rconRetryTimeout = undefined; // Clear the stored timeout ID
-             if (this.runningServers.has(id)) { // Check if server is still supposed to be running
-                 this.connectRcon(id);
-             }
-         }, delayMs);
-         this.runningServers.set(id, serverInfo); // Update map with timeout ID
+        serverInfo.rconRetryTimeout = setTimeout(async () => {
+            this.logger.log(`尝试为服务器 ${id} 重新连接 RCON`);
+            try {
+                // 在尝试重新连接之前，确保RCON连接已断开
+                if (serverInfo.rcon) {
+                    serverInfo.rcon = null;
+                }
+                await this.connectRcon(id);
+            } catch (err: any) {
+                this.logger.error(`为服务器 ${id} 重新连接 RCON 失败: ${err.message}`);
+                // 如果重新连接再次失败，可以再次调度
+                // this.scheduleRconReconnect(id, delayMs * 2); // Example: exponential backoff
+            }
+        }, delayMs);
     }
 
     async connectRcon(id: number): Promise<void> {
         const serverInfo = this.runningServers.get(id);
-        if (!serverInfo || serverInfo.rcon || serverInfo.rconConnecting) {
-            this.logger.debug(`跳过 RCON 连接尝试: ${!serverInfo ? '服务器信息不存在' : serverInfo.rcon ? '已连接' : '正在连接'}`);
-            return; // Already connected, connecting, or server stopped
-        }
-
-        const instance = serverInfo.instance; // Get instance data from map
-
-        // Fetch potential RCON config from Rcon.cfg first
-        let rconPort = instance.rconPort; // Default to DB value
-        let rconPassword = instance.rconPassword; // Default to DB value
-
-        try {
-            const rconConfigFromFile = await this.readRconConfigFromFile(instance.installPath);
-            if (rconConfigFromFile.port !== undefined) {
-                 this.logger.log(`从 Rcon.cfg 读取到端口: ${rconConfigFromFile.port}，将覆盖数据库值 ${instance.rconPort}`);
-                 rconPort = rconConfigFromFile.port;
-            }
-            if (rconConfigFromFile.password !== undefined) {
-                 this.logger.log(`从 Rcon.cfg 读取到密码，将覆盖数据库值`);
-                 rconPassword = rconConfigFromFile.password;
-            }
-        } catch (readErr: any) {
-            this.logger.warn(`读取 Rcon.cfg 失败 (服务器 ${id})，将使用数据库中的值: ${readErr.message}`);
-            // Continue with DB values if file read fails
-        }
-
-
-        if (!rconPassword || !rconPort) {
-            this.logger.warn(`RCON 密码或端口未配置 (服务器 ${id})`);
+        if (!serverInfo || !serverInfo.process) {
+            this.logger.warn(`无法连接RCON：服务器 ${id} 未运行。`);
             return;
         }
 
-        // Connect to localhost instead of non-existent ipAddress property
-        this.logger.log(`尝试连接 RCON 到 127.0.0.1:${rconPort} (服务器 ${id})`);
-        serverInfo.rconConnecting = true;
-        this.runningServers.set(id, serverInfo); // Update state
+        if (serverInfo.rcon) {
+            this.logger.log(`RCON for server ${id} is already connected.`);
+            return;
+        }
 
-        let rcon: Rcon | null = null; // Define rcon variable outside try block
+        if (serverInfo.rconConnecting) {
+            this.logger.log(`RCON connection for server ${id} is already in progress.`);
+            return;
+        }
+        
+        const { Rcon } = await import('squad-rcon');
+
         try {
-            rcon = new Rcon({
-                id: instance.id, // Add the required instance ID
-                host: '127.0.0.1', // Use localhost directly
+            this.logger.log(`正在为服务器 ${id} 连接 RCON...`);
+            serverInfo.rconConnecting = true;
+
+            const rconConfigFromFile = await this.readRconConfigFromFile(serverInfo.instance.installPath);
+            
+            const rconPort = rconConfigFromFile.port ?? serverInfo.instance.rconPort;
+            const rconPassword = rconConfigFromFile.password ?? serverInfo.instance.rconPassword;
+
+            if (!rconPort || !rconPassword) {
+                this.logger.error(`服务器 ${id} 的 RCON 端口或密码未配置。`);
+                serverInfo.rconConnecting = false;
+                return;
+            }
+
+            const rcon: Rcon = new Rcon({
+                id: serverInfo.instance.id,
+                host: '127.0.0.1',
                 port: rconPort,
                 password: rconPassword,
-                autoReconnect: false, // We handle reconnect logic manually
-                // timeout: 30000, // Invalid option for this library version?
+                autoReconnect: false,
             });
 
-            // Handle RCON events
-            rcon.on('connected', () => {
-                this.logger.log(`RCON 连接成功 (服务器 ${id})`);
+            rcon.on('connect', () => {
+                this.logger.log(`服务器 ${id} 的 RCON 已成功连接`);
                 const currentServerInfo = this.runningServers.get(id);
                 if (currentServerInfo) {
                     currentServerInfo.rconConnecting = false;
